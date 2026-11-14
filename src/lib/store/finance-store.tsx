@@ -21,6 +21,7 @@ import type {
   RecurrenceEditScope,
   RecurrenceRule,
   ScreenId,
+  ThemeMode,
   Transaction,
   TransactionFilters,
 } from "../finance/types";
@@ -29,27 +30,130 @@ import {
   calculateBudgetSummary,
   calculateMonthProjection,
   calculateNextIncomeStretch,
+  getDaysInMonth,
   getNextYearMonth,
   getPreviousYearMonth,
+  getTodayMexicoCity,
 } from "../finance/engine";
-import {
-  P32_UNQUANTIFIED_TRANSACTIONS,
-  SOFIA_ACCOUNT,
-  SOFIA_AUDIT_LOG,
-  SOFIA_BUDGET,
-  SOFIA_CATEGORIES,
-  SOFIA_NOTIFICATIONS,
-  SOFIA_RECURRENCE_RULES,
-  SOFIA_REFERENCE_DATE,
-  SOFIA_TRANSACTIONS,
-  SOFIA_USER_ID,
-  SOFIA_WORKSPACE_ID,
-} from "../finance/seed-data";
 import { supabase } from "../supabase/client";
 
-const STORAGE_KEY = "afp_pwa_state_v1_1_2";
+const THEME_STORAGE_KEY = "afp_theme_mode";
+const TUTORIAL_SEEN_PREFIX = "afp_tutorial_seen_";
 
-interface OnboardingDraft {
+const DEFAULT_BASE_CATEGORIES: Omit<Category, "workspace_id">[] = [
+  {
+    id: "cat-vivienda",
+    name: "Hogar y Vivienda",
+    kind: "expense",
+    default_priority: "essential",
+    icon: "home",
+    color_token: "terracotta",
+    sort_order: 1,
+    is_active: true,
+  },
+  {
+    id: "cat-servicios",
+    name: "Servicios (Luz, Agua, Internet)",
+    kind: "expense",
+    default_priority: "essential",
+    icon: "bolt",
+    color_token: "terracotta",
+    sort_order: 2,
+    is_active: true,
+  },
+  {
+    id: "cat-despensa",
+    name: "Despensa y Supermercado",
+    kind: "expense",
+    default_priority: "essential",
+    icon: "shopping_cart",
+    color_token: "forest",
+    sort_order: 3,
+    is_active: true,
+  },
+  {
+    id: "cat-transporte",
+    name: "Transporte y Gasolina",
+    kind: "expense",
+    default_priority: "important",
+    icon: "directions_car",
+    color_token: "amber",
+    sort_order: 4,
+    is_active: true,
+  },
+  {
+    id: "cat-salud",
+    name: "Salud y Seguros",
+    kind: "expense",
+    default_priority: "important",
+    icon: "shield",
+    color_token: "amber",
+    sort_order: 5,
+    is_active: true,
+  },
+  {
+    id: "cat-educacion",
+    name: "Educación y Cursos",
+    kind: "expense",
+    default_priority: "important",
+    icon: "school",
+    color_token: "sage",
+    sort_order: 6,
+    is_active: true,
+  },
+  {
+    id: "cat-tarjetas",
+    name: "Tarjetas y Créditos",
+    kind: "expense",
+    default_priority: "essential",
+    icon: "credit_card",
+    color_token: "terracotta",
+    sort_order: 7,
+    is_active: true,
+  },
+  {
+    id: "cat-suscripciones",
+    name: "Suscripciones Digitales",
+    kind: "expense",
+    default_priority: "flexible",
+    icon: "subscriptions",
+    color_token: "slate",
+    sort_order: 8,
+    is_active: true,
+  },
+  {
+    id: "cat-entretenimiento",
+    name: "Entretenimiento y Salidas",
+    kind: "expense",
+    default_priority: "flexible",
+    icon: "movie",
+    color_token: "slate",
+    sort_order: 9,
+    is_active: true,
+  },
+  {
+    id: "cat-nomina",
+    name: "Sueldo y Nómina",
+    kind: "income",
+    default_priority: "essential",
+    icon: "payments",
+    color_token: "emerald",
+    sort_order: 10,
+    is_active: true,
+  },
+  {
+    id: "cat-freelance",
+    name: "Freelance y Otros Ingresos",
+    kind: "income",
+    default_priority: "important",
+    icon: "work",
+    color_token: "emerald",
+    sort_order: 11,
+    is_active: true,
+  },
+];
+
+export interface OnboardingDraft {
   openingBalance: number;
   openingDate: string;
   monthlyBudget: number;
@@ -74,19 +178,31 @@ interface OnboardingDraft {
 }
 
 interface FinanceStoreContextValue {
-  // Navegación y pantalla activa (P01..P33)
+  // Navegación
   activeScreen: ScreenId;
   setActiveScreen: (screen: ScreenId) => void;
   previousScreen: ScreenId;
   goBack: () => void;
 
-  // Usuario y autenticación
+  // Tema (Claro / Oscuro)
+  theme: ThemeMode;
+  toggleTheme: () => void;
+  setTheme: (mode: ThemeMode) => void;
+
+  // Tutorial interactivo para nuevos usuarios
+  isTutorialOpen: boolean;
+  setIsTutorialOpen: (open: boolean) => void;
+
+  // Usuario y Autenticación Multi-usuario en Supabase
+  isInitializingAuth: boolean;
   user: {
     id: string;
     name: string;
     email: string;
-    isSupabaseAuthenticated: boolean;
+    isAuthenticated: boolean;
+    onboardingCompleted: boolean;
   };
+  workspaceId: string;
   loginWithEmail: (
     email: string,
     password?: string
@@ -95,19 +211,23 @@ interface FinanceStoreContextValue {
     name: string,
     email: string,
     password?: string
+  ) => Promise<{ ok: boolean; error?: string; needsEmailConfirmation?: boolean }>;
+  signInWithGoogle: () => Promise<{ ok: boolean; error?: string }>;
+  sendPasswordResetEmail: (
+    email: string
   ) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
   syncWithSupabase: () => Promise<{ ok: boolean; message: string }>;
   isSyncing: boolean;
   syncStatusMessage: string | null;
 
-  // Periodo y selección en calendario
-  currentYearMonth: string; // '2026-11'
+  // Fechas y selección en calendario
+  currentYearMonth: string;
   setCurrentYearMonth: (ym: string) => void;
   goToPreviousMonth: () => void;
   goToNextMonth: () => void;
-  referenceDate: string; // '2026-11-18'
-  selectedDate: string; // '2026-11-17'
+  referenceDate: string;
+  selectedDate: string;
   setSelectedDate: (date: string) => void;
   selectedTransactionId: string | null;
   setSelectedTransactionId: (id: string | null) => void;
@@ -116,7 +236,7 @@ interface FinanceStoreContextValue {
   selectedCategoryId: string | null;
   setSelectedCategoryId: (id: string | null) => void;
 
-  // Entidades principales
+  // Entidades del usuario autenticado
   account: Account;
   budget: Budget;
   categories: Category[];
@@ -130,86 +250,76 @@ interface FinanceStoreContextValue {
   budgetSummary: BudgetSummary;
   nextIncomeStretch: NextIncomeStretch;
 
-  // Filtros de Movimientos (P18 / P19)
+  // Filtros de Movimientos
   filters: TransactionFilters;
   setFilters: React.Dispatch<React.SetStateAction<TransactionFilters>>;
   resetFilters: () => void;
 
-  // Onboarding borrador (P05..P09)
+  // Onboarding
   onboardingDraft: OnboardingDraft;
   setOnboardingDraft: React.Dispatch<React.SetStateAction<OnboardingDraft>>;
-  completeOnboarding: () => void;
+  completeOnboarding: () => Promise<void>;
 
-  // Acciones de negocio sobre movimientos
+  // Acciones CRUD de Movimientos (sincronizadas con Supabase)
   createTransaction: (
     tx: Omit<
       Transaction,
       "id" | "workspace_id" | "account_id" | "created_at" | "updated_at"
     >
-  ) => Transaction;
+  ) => Promise<Transaction>;
   updateTransaction: (
     id: string,
     updates: Partial<Transaction>,
     recurrenceScope?: RecurrenceEditScope
-  ) => void;
+  ) => Promise<void>;
+  deleteTransaction: (id: string) => Promise<void>;
   confirmExpensePayment: (params: {
     transactionId: string;
     actualAmount: number;
     settledDate: string;
     notes?: string;
-  }) => void;
+  }) => Promise<void>;
   confirmIncomeReceipt: (params: {
     transactionId: string;
     actualAmount: number;
     settledDate: string;
     notes?: string;
-  }) => void;
-  rescheduleTransaction: (transactionId: string, newExpectedDate: string) => void;
-  cancelTransaction: (transactionId: string) => void;
+  }) => Promise<void>;
+  rescheduleTransaction: (
+    transactionId: string,
+    newExpectedDate: string
+  ) => Promise<void>;
+  cancelTransaction: (transactionId: string) => Promise<void>;
 
-  // Acciones sobre Presupuesto (P21)
-  updateBudget: (updates: Partial<Budget>) => void;
-
-  // Acciones sobre Cuenta / Saldo Inicial (P29)
+  // Presupuesto y Cuenta
+  updateBudget: (updates: Partial<Budget>) => Promise<void>;
   updateAccountOpeningBalance: (
     newBalance: number,
     newDate: string
-  ) => void;
+  ) => Promise<void>;
 
-  // Acciones sobre Reglas Recurrentes (P22, P23, P24)
+  // Reglas Recurrentes
   createRecurrenceRule: (
     rule: Omit<RecurrenceRule, "id" | "workspace_id" | "account_id">
-  ) => void;
+  ) => Promise<void>;
   updateRecurrenceRule: (
     id: string,
     updates: Partial<RecurrenceRule>
-  ) => void;
-  toggleRecurrenceRuleStatus: (id: string) => void;
+  ) => Promise<void>;
+  deleteRecurrenceRule: (id: string) => Promise<void>;
+  toggleRecurrenceRuleStatus: (id: string) => Promise<void>;
 
-  // Acciones sobre Categorías (P25, P26, P27)
+  // Categorías
   createCategory: (
     cat: Omit<Category, "id" | "workspace_id" | "sort_order">
-  ) => void;
-  updateCategory: (id: string, updates: Partial<Category>) => void;
+  ) => Promise<void>;
+  updateCategory: (id: string, updates: Partial<Category>) => Promise<void>;
 
-  // Acciones sobre Avisos (P30)
-  markNotificationAsRead: (id: string) => void;
-  markAllNotificationsAsRead: () => void;
+  // Avisos
+  markNotificationAsRead: (id: string) => Promise<void>;
+  markAllNotificationsAsRead: () => Promise<void>;
 
-  // Utilidades de demostración y restauración del dataset maestro (Sofía PRD 8.3)
-  resetToSofiaMasterDataset: () => void;
-  pendingRecurrenceEdit: {
-    transactionId: string;
-    updates: Partial<Transaction>;
-  } | null;
-  setPendingRecurrenceEdit: (
-    pending: {
-      transactionId: string;
-      updates: Partial<Transaction>;
-    } | null
-  ) => void;
-
-  // Toast informativo global
+  // Toast global
   toastMessage: string | null;
   showToast: (msg: string) => void;
 }
@@ -223,70 +333,6 @@ const DEFAULT_FILTERS: TransactionFilters = {
   recurrenceFilter: "all",
 };
 
-const DEFAULT_ONBOARDING_DRAFT: OnboardingDraft = {
-  openingBalance: 6480.5,
-  openingDate: "2026-11-18",
-  monthlyBudget: 20000.0,
-  alertThresholdPercent: 80,
-  selectedCategories: [
-    "cat-vivienda",
-    "cat-servicios",
-    "cat-despensa",
-    "cat-transporte",
-    "cat-seguros",
-    "cat-suscripciones",
-    "cat-entretenimiento",
-    "cat-tarjetas",
-  ],
-  incomes: [
-    {
-      id: "onb-inc-1",
-      title: "Nómina quincenal",
-      amount: 9000.0,
-      frequency: "semimonthly",
-      dayOfMonth: 15,
-    },
-  ],
-  fixedExpenses: [
-    {
-      id: "onb-exp-1",
-      title: "Renta departamento",
-      amount: 6500.0,
-      dayOfMonth: 1,
-      priority: "essential",
-      amountType: "fixed",
-      categoryId: "cat-vivienda",
-    },
-    {
-      id: "onb-exp-2",
-      title: "Internet fibra óptica",
-      amount: 499.0,
-      dayOfMonth: 18,
-      priority: "essential",
-      amountType: "fixed",
-      categoryId: "cat-servicios",
-    },
-    {
-      id: "onb-exp-3",
-      title: "Recibo de luz CFE",
-      amount: 650.0,
-      dayOfMonth: 17,
-      priority: "essential",
-      amountType: "variable",
-      categoryId: "cat-servicios",
-    },
-    {
-      id: "onb-exp-4",
-      title: "Netflix estándar",
-      amount: 219.0,
-      dayOfMonth: 22,
-      priority: "flexible",
-      amountType: "variable",
-      categoryId: "cat-suscripciones",
-    },
-  ],
-};
-
 const FinanceStoreContext = createContext<FinanceStoreContextValue | null>(
   null
 );
@@ -296,49 +342,79 @@ export function FinanceStoreProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [activeScreen, setActiveScreenState] = useState<ScreenId>("P10");
-  const [previousScreen, setPreviousScreen] = useState<ScreenId>("P10");
+  const todayStr = useMemo(() => getTodayMexicoCity(), []);
+  const initialYearMonth = useMemo(() => todayStr.slice(0, 7), [todayStr]);
+
+  const [activeScreen, setActiveScreenState] = useState<ScreenId>("P01");
+  const [previousScreen, setPreviousScreen] = useState<ScreenId>("P01");
+
+  const [theme, setThemeState] = useState<ThemeMode>("light");
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
+  const [isInitializingAuth, setIsInitializingAuth] = useState(true);
 
   const [user, setUser] = useState({
-    id: SOFIA_USER_ID,
-    name: "Sofía Ramírez",
-    email: "sofia.ramirez@ejemplo.mx",
-    isSupabaseAuthenticated: false,
+    id: "",
+    name: "",
+    email: "",
+    isAuthenticated: false,
+    onboardingCompleted: false,
   });
 
-  const [currentYearMonth, setCurrentYearMonth] = useState<string>("2026-11");
-  const [referenceDate] = useState<string>(SOFIA_REFERENCE_DATE);
-  const [selectedDate, setSelectedDate] = useState<string>("2026-11-17");
+  const [workspaceId, setWorkspaceId] = useState<string>("");
+
+  const [currentYearMonth, setCurrentYearMonth] =
+    useState<string>(initialYearMonth);
+  const [referenceDate] = useState<string>(todayStr);
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [selectedTransactionId, setSelectedTransactionId] = useState<
     string | null
-  >("tx-exp-05"); // Por defecto Recibo de luz CFE vencido ($650.00)
-  const [selectedRuleId, setSelectedRuleId] = useState<string | null>(
-    "rule-renta"
-  );
+  >(null);
+  const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
-    "cat-servicios"
+    null
   );
 
-  const [account, setAccount] = useState<Account>(SOFIA_ACCOUNT);
-  const [budget, setBudget] = useState<Budget>(SOFIA_BUDGET);
-  const [categories, setCategories] = useState<Category[]>(SOFIA_CATEGORIES);
-  const [recurrenceRules, setRecurrenceRules] = useState<RecurrenceRule[]>(
-    SOFIA_RECURRENCE_RULES
+  const [account, setAccount] = useState<Account>({
+    id: "acc-empty",
+    workspace_id: "",
+    name: "Cuenta principal",
+    type: "liquida",
+    currency: "MXN",
+    opening_balance: 0,
+    opening_balance_date: todayStr,
+    opening_balance_at: new Date().toISOString(),
+    is_active: true,
+  });
+
+  const [budget, setBudget] = useState<Budget>({
+    id: "bud-empty",
+    workspace_id: "",
+    month: `${initialYearMonth}-01`,
+    total_limit: 0,
+    alert_threshold_percent: 80,
+    min_cushion_amount: 0,
+    min_cushion_percent: 10,
+  });
+
+  const [categories, setCategories] = useState<Category[]>(
+    DEFAULT_BASE_CATEGORIES.map((c) => ({ ...c, workspace_id: "" }))
   );
-  const [transactions, setTransactions] =
-    useState<Transaction[]>(SOFIA_TRANSACTIONS);
-  const [notifications, setNotifications] =
-    useState<AppNotification[]>(SOFIA_NOTIFICATIONS);
-  const [auditLog, setAuditLog] = useState<AuditLogEntry[]>(SOFIA_AUDIT_LOG);
+  const [recurrenceRules, setRecurrenceRules] = useState<RecurrenceRule[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
 
   const [filters, setFilters] = useState<TransactionFilters>(DEFAULT_FILTERS);
-  const [onboardingDraft, setOnboardingDraft] = useState<OnboardingDraft>(
-    DEFAULT_ONBOARDING_DRAFT
-  );
-  const [pendingRecurrenceEdit, setPendingRecurrenceEdit] = useState<{
-    transactionId: string;
-    updates: Partial<Transaction>;
-  } | null>(null);
+
+  const [onboardingDraft, setOnboardingDraft] = useState<OnboardingDraft>({
+    openingBalance: 0,
+    openingDate: todayStr,
+    monthlyBudget: 0,
+    alertThresholdPercent: 80,
+    selectedCategories: DEFAULT_BASE_CATEGORIES.map((c) => c.id),
+    incomes: [],
+    fixedExpenses: [],
+  });
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatusMessage, setSyncStatusMessage] = useState<string | null>(
@@ -353,68 +429,352 @@ export function FinanceStoreProvider({
     }, 3500);
   }, []);
 
-  // Hidratación desde localStorage y sesión Supabase
+  // Gestión de Modo Oscuro / Claro
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed.account) setAccount(parsed.account);
-        if (parsed.budget) setBudget(parsed.budget);
-        if (parsed.categories) setCategories(parsed.categories);
-        if (parsed.recurrenceRules) setRecurrenceRules(parsed.recurrenceRules);
-        if (parsed.transactions) setTransactions(parsed.transactions);
-        if (parsed.notifications) setNotifications(parsed.notifications);
-        if (parsed.auditLog) setAuditLog(parsed.auditLog);
+      const savedTheme = localStorage.getItem(THEME_STORAGE_KEY) as ThemeMode | null;
+      if (savedTheme === "dark" || savedTheme === "light") {
+        setThemeState(savedTheme);
+        document.documentElement.classList.toggle("dark", savedTheme === "dark");
+      } else if (
+        window.matchMedia &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches
+      ) {
+        setThemeState("dark");
+        document.documentElement.classList.add("dark");
       }
     } catch {
-      // Ignorar errores de parseo de localStorage
+      // ignore
     }
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session?.user) {
-        const u = data.session.user;
-        setUser({
-          id: u.id,
-          name:
-            u.user_metadata?.full_name ||
-            u.user_metadata?.name ||
-            u.email?.split("@")[0] ||
-            "Sofía",
-          email: u.email || "sofia@ejemplo.mx",
-          isSupabaseAuthenticated: true,
-        });
-      }
-    });
   }, []);
 
-  // Guardar cambios en localStorage automáticamente
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          account,
-          budget,
-          categories,
-          recurrenceRules,
-          transactions,
-          notifications,
-          auditLog,
-        })
-      );
-    } catch {
-      // Ignorar si storage está lleno
+  const setTheme = useCallback((mode: ThemeMode) => {
+    setThemeState(mode);
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.toggle("dark", mode === "dark");
     }
-  }, [
-    account,
-    budget,
-    categories,
-    recurrenceRules,
-    transactions,
-    notifications,
-    auditLog,
-  ]);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, mode);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setTheme(theme === "dark" ? "light" : "dark");
+  }, [theme, setTheme]);
+
+  // Carga completa del espacio de trabajo de un usuario autenticado desde Supabase
+  const loadUserWorkspaceFromSupabase = useCallback(
+    async (authUser: {
+      id: string;
+      email?: string;
+      user_metadata?: Record<string, unknown>;
+    }) => {
+      setIsSyncing(true);
+      try {
+        // 1. Asegurar espacio de trabajo, cuenta principal, categorías y presupuesto mediante RPC
+        const { data: rpcWorkspaceId } = await supabase.rpc(
+          "ensure_user_workspace" as never
+        );
+
+        // 2. Obtener perfil de public.users
+        const { data: userProfile } = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", authUser.id)
+          .single();
+
+        // 3. Resolver workspace_id
+        let activeWsId =
+          typeof rpcWorkspaceId === "string" ? rpcWorkspaceId : "";
+        if (!activeWsId) {
+          const { data: wsRows } = await supabase
+            .from("workspaces")
+            .select("id")
+            .eq("owner_user_id", authUser.id)
+            .order("created_at", { ascending: true })
+            .limit(1);
+          activeWsId = wsRows?.[0]?.id || "";
+        }
+
+        if (!activeWsId) {
+          setIsSyncing(false);
+          return;
+        }
+
+        setWorkspaceId(activeWsId);
+
+        // 4. Cargar cuenta, categorías, presupuesto, reglas, transacciones, notificaciones y bitácora en paralelo
+        const [
+          accRes,
+          catRes,
+          budRes,
+          rulesRes,
+          txsRes,
+          notifRes,
+          auditRes,
+        ] = await Promise.all([
+          supabase
+            .from("accounts")
+            .select("*")
+            .eq("workspace_id", activeWsId)
+            .order("created_at", { ascending: true })
+            .limit(1),
+          supabase
+            .from("categories")
+            .select("*")
+            .eq("workspace_id", activeWsId)
+            .order("sort_order", { ascending: true }),
+          supabase
+            .from("budgets")
+            .select("*")
+            .eq("workspace_id", activeWsId)
+            .order("month", { ascending: false })
+            .limit(1),
+          supabase
+            .from("recurrence_rules")
+            .select("*")
+            .eq("workspace_id", activeWsId)
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("transactions")
+            .select("*")
+            .eq("workspace_id", activeWsId)
+            .order("expected_date", { ascending: true }),
+          supabase
+            .from("notifications")
+            .select("*")
+            .eq("workspace_id", activeWsId)
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("audit_log")
+            .select("*")
+            .eq("workspace_id", activeWsId)
+            .order("changed_at", { ascending: false })
+            .limit(50),
+        ]);
+
+        if (accRes.data?.[0]) {
+          const a = accRes.data[0];
+          setAccount({
+            id: a.id,
+            workspace_id: a.workspace_id,
+            name: a.name,
+            type: "liquida",
+            currency: a.currency,
+            opening_balance: Number(a.opening_balance),
+            opening_balance_date: a.opening_balance_date,
+            opening_balance_at: a.opening_balance_at,
+            is_active: a.is_active,
+          });
+        }
+
+        if (catRes.data && catRes.data.length > 0) {
+          const loadedCats: Category[] = catRes.data.map((c) => ({
+            id: c.id,
+            workspace_id: c.workspace_id,
+            name: c.name,
+            kind: c.kind as Category["kind"],
+            default_priority: c.default_priority as PriorityLevel,
+            icon: c.icon,
+            color_token: c.color_token,
+            sort_order: c.sort_order,
+            is_active: c.is_active,
+          }));
+          setCategories(loadedCats);
+          setOnboardingDraft((prev) => ({
+            ...prev,
+            selectedCategories: loadedCats.map((c) => c.id),
+          }));
+          setSelectedCategoryId(loadedCats[0]?.id || null);
+        }
+
+        if (budRes.data?.[0]) {
+          const b = budRes.data[0];
+          setBudget({
+            id: b.id,
+            workspace_id: b.workspace_id,
+            month: b.month,
+            total_limit: Number(b.total_limit),
+            alert_threshold_percent: Number(b.alert_threshold_percent),
+            min_cushion_amount:
+              b.min_cushion_amount !== null
+                ? Number(b.min_cushion_amount)
+                : null,
+            min_cushion_percent: Number(b.min_cushion_percent),
+          });
+        }
+
+        if (rulesRes.data) {
+          const loadedRules: RecurrenceRule[] = rulesRes.data.map((r) => ({
+            id: r.id,
+            workspace_id: r.workspace_id,
+            account_id: r.account_id,
+            type: r.type as RecurrenceRule["type"],
+            title: r.title,
+            category_id: r.category_id,
+            priority: r.priority as PriorityLevel,
+            amount_type: r.amount_type as RecurrenceRule["amount_type"],
+            default_amount:
+              r.default_amount !== null ? Number(r.default_amount) : null,
+            frequency: r.frequency as RecurrenceRule["frequency"],
+            interval_count: r.interval_count,
+            day_of_month: r.day_of_month,
+            semimonthly_days: r.semimonthly_days,
+            day_of_week: r.day_of_week,
+            start_date: r.start_date,
+            end_date: r.end_date,
+            status: r.status as RecurrenceRule["status"],
+            notes: r.notes,
+          }));
+          setRecurrenceRules(loadedRules);
+          setSelectedRuleId(loadedRules[0]?.id || null);
+        }
+
+        if (txsRes.data) {
+          const loadedTxs: Transaction[] = txsRes.data.map((t) => ({
+            id: t.id,
+            workspace_id: t.workspace_id,
+            account_id: t.account_id,
+            type: t.type as Transaction["type"],
+            title: t.title,
+            category_id: t.category_id,
+            priority: t.priority as PriorityLevel,
+            status: t.status as Transaction["status"],
+            amount_type: t.amount_type as Transaction["amount_type"],
+            estimated_amount:
+              t.estimated_amount !== null ? Number(t.estimated_amount) : null,
+            actual_amount:
+              t.actual_amount !== null ? Number(t.actual_amount) : null,
+            expected_date: t.expected_date,
+            settled_date: t.settled_date,
+            settled_at: t.settled_at,
+            recurrence_rule_id: t.recurrence_rule_id,
+            occurrence_date: t.occurrence_date,
+            is_exception: t.is_exception,
+            notes: t.notes,
+            created_at: t.created_at,
+            updated_at: t.updated_at,
+          }));
+          setTransactions(loadedTxs);
+          setSelectedTransactionId(loadedTxs[0]?.id || null);
+        }
+
+        if (notifRes.data) {
+          setNotifications(
+            notifRes.data.map((n) => ({
+              id: n.id,
+              workspace_id: n.workspace_id,
+              user_id: n.user_id,
+              type: n.type as AppNotification["type"],
+              title: n.title,
+              body: n.body,
+              related_transaction_id: n.related_transaction_id,
+              scheduled_for: n.scheduled_for,
+              read_at: n.read_at,
+              created_at: n.created_at,
+            }))
+          );
+        }
+
+        if (auditRes.data) {
+          setAuditLog(auditRes.data);
+        }
+
+        const isCompleted = Boolean(userProfile?.onboarding_completed);
+        const displayName =
+          userProfile?.name ||
+          (authUser.user_metadata?.full_name as string) ||
+          (authUser.user_metadata?.name as string) ||
+          authUser.email?.split("@")[0] ||
+          "Usuario";
+
+        setUser({
+          id: authUser.id,
+          name: displayName,
+          email: authUser.email || "",
+          isAuthenticated: true,
+          onboardingCompleted: isCompleted,
+        });
+
+        // Si el usuario aún no ha completado el onboarding, llevarlo al Paso 1 (P05)
+        setActiveScreenState((prev) => {
+          if (["P01", "P02", "P03", "P04"].includes(prev)) {
+            return isCompleted ? "P10" : "P05";
+          }
+          return prev;
+        });
+
+        // Mostrar el tutorial interactivo si es su primera vez en el calendario
+        if (isCompleted) {
+          try {
+            const seen = localStorage.getItem(
+              `${TUTORIAL_SEEN_PREFIX}${authUser.id}`
+            );
+            if (!seen) {
+              setIsTutorialOpen(true);
+              localStorage.setItem(
+                `${TUTORIAL_SEEN_PREFIX}${authUser.id}`,
+                "true"
+              );
+            }
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // Error silencioso en carga inicial
+      } finally {
+        setIsSyncing(false);
+      }
+    },
+    []
+  );
+
+  // Suscripción al estado de sesión de Supabase Auth
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!mounted) return;
+      if (data.session?.user) {
+        await loadUserWorkspaceFromSupabase(data.session.user);
+      }
+      if (mounted) setIsInitializingAuth(false);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (!mounted) return;
+        if (
+          (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") &&
+          session?.user
+        ) {
+          await loadUserWorkspaceFromSupabase(session.user);
+        } else if (event === "SIGNED_OUT") {
+          setUser({
+            id: "",
+            name: "",
+            email: "",
+            isAuthenticated: false,
+            onboardingCompleted: false,
+          });
+          setWorkspaceId("");
+          setTransactions([]);
+          setRecurrenceRules([]);
+          setNotifications([]);
+          setAuditLog([]);
+          setActiveScreenState("P01");
+        }
+      }
+    );
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, [loadUserWorkspaceFromSupabase]);
 
   const setActiveScreen = useCallback(
     (next: ScreenId) => {
@@ -439,30 +799,16 @@ export function FinanceStoreProvider({
     setCurrentYearMonth((prev) => getNextYearMonth(prev));
   }, []);
 
-  // Para la pantalla especial P32 (Inicio con proyección incompleta), inyectamos las 2 transacciones sin monto estimado
-  const effectiveTransactions = useMemo(() => {
-    if (activeScreen === "P32") {
-      return [...transactions, ...P32_UNQUANTIFIED_TRANSACTIONS];
-    }
-    if (activeScreen === "P31") {
-      return [];
-    }
-    return transactions;
-  }, [activeScreen, transactions]);
-
   const monthProjection = useMemo(
     () =>
       calculateMonthProjection({
         yearMonth: currentYearMonth,
         referenceDate,
-        account:
-          activeScreen === "P31"
-            ? { ...account, opening_balance: 0 }
-            : account,
-        transactions: effectiveTransactions,
+        account,
+        transactions,
         budget,
       }),
-    [currentYearMonth, referenceDate, account, activeScreen, effectiveTransactions, budget]
+    [currentYearMonth, referenceDate, account, transactions, budget]
   );
 
   const budgetSummary = useMemo(
@@ -471,10 +817,10 @@ export function FinanceStoreProvider({
         yearMonth: currentYearMonth,
         referenceDate,
         account,
-        transactions: effectiveTransactions,
+        transactions,
         budget,
       }),
-    [currentYearMonth, referenceDate, account, effectiveTransactions, budget]
+    [currentYearMonth, referenceDate, account, transactions, budget]
   );
 
   const nextIncomeStretch = useMemo(
@@ -483,77 +829,241 @@ export function FinanceStoreProvider({
         yearMonth: currentYearMonth,
         referenceDate,
         account,
-        transactions: effectiveTransactions,
+        transactions,
         budget,
       }),
-    [currentYearMonth, referenceDate, account, effectiveTransactions, budget]
+    [currentYearMonth, referenceDate, account, transactions, budget]
   );
 
-  const recordAuditEntries = useCallback(
-    (oldTx: Transaction, newTx: Transaction) => {
-      const fields: (keyof Transaction)[] = [
-        "estimated_amount",
-        "actual_amount",
-        "expected_date",
-        "settled_date",
-        "status",
-      ];
-      const newEntries: AuditLogEntry[] = [];
-      const nowIso = new Date().toISOString();
+  // Autenticación: Inicio de sesión con correo y contraseña
+  const loginWithEmail = useCallback(
+    async (email: string, password?: string) => {
+      if (!password) {
+        return { ok: false, error: "Por favor ingresa tu contraseña." };
+      }
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-      for (const field of fields) {
-        const oldVal = oldTx[field];
-        const newVal = newTx[field];
-        if (oldVal !== newVal) {
-          newEntries.push({
-            id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            workspace_id: SOFIA_WORKSPACE_ID,
-            entity_type: "transaction",
-            entity_id: newTx.id,
-            field_changed: field,
-            old_value: oldVal !== null && oldVal !== undefined ? String(oldVal) : null,
-            new_value: newVal !== null && newVal !== undefined ? String(newVal) : null,
-            changed_by: user.id,
-            changed_at: nowIso,
-          });
-        }
+      if (error) {
+        return {
+          ok: false,
+          error:
+            error.message === "Invalid login credentials"
+              ? "Correo o contraseña incorrectos. Verifica tus datos o crea una cuenta nueva."
+              : error.message,
+        };
       }
-      if (newEntries.length > 0) {
-        setAuditLog((prev) => [...newEntries, ...prev]);
+
+      if (data.user) {
+        await loadUserWorkspaceFromSupabase(data.user);
+        showToast("¡Bienvenido de nuevo a tu calendario financiero!");
       }
+      return { ok: true };
     },
-    [user.id]
+    [loadUserWorkspaceFromSupabase, showToast]
   );
 
+  // Autenticación: Registro de nuevo usuario en plataforma
+  const registerWithEmail = useCallback(
+    async (name: string, email: string, password?: string) => {
+      if (!password || password.length < 8) {
+        return {
+          ok: false,
+          error: "La contraseña debe tener al menos 8 caracteres.",
+        };
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: { full_name: name.trim() },
+          emailRedirectTo:
+            typeof window !== "undefined"
+              ? `${window.location.origin}/auth/callback`
+              : undefined,
+        },
+      });
+
+      if (error) {
+        return {
+          ok: false,
+          error:
+            error.message === "User already registered"
+              ? "Este correo ya está registrado. Inicia sesión con tu cuenta."
+              : error.message,
+        };
+      }
+
+      if (data.user && data.session) {
+        await loadUserWorkspaceFromSupabase(data.user);
+        setActiveScreenState("P05");
+        showToast("¡Cuenta creada! Vamos a configurar tu espacio paso a paso.");
+        return { ok: true };
+      }
+
+      if (data.user && !data.session) {
+        return {
+          ok: true,
+          needsEmailConfirmation: true,
+        };
+      }
+
+      return { ok: true };
+    },
+    [loadUserWorkspaceFromSupabase, showToast]
+  );
+
+  // Autenticación con Google OAuth
+  const signInWithGoogle = useCallback(async () => {
+    try {
+      const redirectTo =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/auth/callback`
+          : undefined;
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo,
+          queryParams: {
+            access_type: "offline",
+            prompt: "consent",
+          },
+        },
+      });
+
+      if (error) {
+        return { ok: false, error: error.message };
+      }
+      return { ok: true };
+    } catch (err) {
+      return {
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : "Error al iniciar sesión con Google",
+      };
+    }
+  }, []);
+
+  // Recuperación de contraseña
+  const sendPasswordResetEmail = useCallback(async (email: string) => {
+    const redirectTo =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/auth/callback`
+        : undefined;
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo,
+    });
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  }, []);
+
+  const logout = useCallback(async () => {
+    await supabase.auth.signOut();
+    setUser({
+      id: "",
+      name: "",
+      email: "",
+      isAuthenticated: false,
+      onboardingCompleted: false,
+    });
+    setWorkspaceId("");
+    setTransactions([]);
+    setRecurrenceRules([]);
+    setNotifications([]);
+    setAuditLog([]);
+    setActiveScreenState("P01");
+    showToast("Sesión cerrada correctamente");
+  }, [showToast]);
+
+  // Crear movimiento (Gasto o Ingreso)
   const createTransaction = useCallback(
-    (
+    async (
       txData: Omit<
         Transaction,
         "id" | "workspace_id" | "account_id" | "created_at" | "updated_at"
       >
-    ): Transaction => {
+    ): Promise<Transaction> => {
       const nowIso = new Date().toISOString();
-      const newTx: Transaction = {
+      const tempId = crypto.randomUUID
+        ? crypto.randomUUID()
+        : `tx-${Date.now()}`;
+
+      const optimisticTx: Transaction = {
         ...txData,
-        id: `tx-${Date.now()}`,
-        workspace_id: SOFIA_WORKSPACE_ID,
+        id: tempId,
+        workspace_id: workspaceId,
         account_id: account.id,
         created_at: nowIso,
         updated_at: nowIso,
       };
-      setTransactions((prev) => [newTx, ...prev]);
+
+      setTransactions((prev) => [optimisticTx, ...prev]);
+
+      if (user.isAuthenticated && workspaceId && account.id !== "acc-empty") {
+        const { data } = await supabase
+          .from("transactions")
+          .insert({
+            workspace_id: workspaceId,
+            account_id: account.id,
+            type: txData.type,
+            title: txData.title,
+            category_id: txData.category_id,
+            priority: txData.priority,
+            status: txData.status,
+            amount_type: txData.amount_type,
+            estimated_amount: txData.estimated_amount,
+            actual_amount: txData.actual_amount,
+            expected_date: txData.expected_date,
+            settled_date: txData.settled_date,
+            settled_at: txData.settled_at,
+            recurrence_rule_id: txData.recurrence_rule_id,
+            occurrence_date: txData.occurrence_date,
+            is_exception: txData.is_exception,
+            notes: txData.notes,
+          })
+          .select("*")
+          .single();
+
+        if (data) {
+          const savedTx: Transaction = {
+            ...optimisticTx,
+            id: data.id,
+            created_at: data.created_at,
+            updated_at: data.updated_at,
+          };
+          setTransactions((prev) =>
+            prev.map((t) => (t.id === tempId ? savedTx : t))
+          );
+          showToast(
+            savedTx.type === "expense"
+              ? "Gasto registrado en tu calendario"
+              : "Ingreso registrado en tu calendario"
+          );
+          return savedTx;
+        }
+      }
+
       showToast(
-        newTx.type === "expense"
-          ? "Gasto guardado en tu calendario"
-          : "Ingreso guardado en tu calendario"
+        optimisticTx.type === "expense"
+          ? "Gasto registrado en tu calendario"
+          : "Ingreso registrado en tu calendario"
       );
-      return newTx;
+      return optimisticTx;
     },
-    [account.id, showToast]
+    [workspaceId, account.id, user.isAuthenticated, showToast]
   );
 
+  // Actualizar movimiento
   const updateTransaction = useCallback(
-    (
+    async (
       id: string,
       updates: Partial<Transaction>,
       recurrenceScope?: RecurrenceEditScope
@@ -569,13 +1079,28 @@ export function FinanceStoreProvider({
           scope: recurrenceScope,
           updates,
         });
-        const updatedTarget = result.transactions.find((t) => t.id === id);
-        if (updatedTarget) {
-          recordAuditEntries(existing, updatedTarget);
-        }
         setTransactions(result.transactions);
         setRecurrenceRules(result.rules);
-        showToast("Cambios aplicados a la recurrencia");
+
+        if (user.isAuthenticated && workspaceId) {
+          for (const tx of result.transactions) {
+            if (tx.recurrence_rule_id === existing.recurrence_rule_id) {
+              await supabase
+                .from("transactions")
+                .update({
+                  title: tx.title,
+                  estimated_amount: tx.estimated_amount,
+                  expected_date: tx.expected_date,
+                  priority: tx.priority,
+                  category_id: tx.category_id,
+                  amount_type: tx.amount_type,
+                  is_exception: tx.is_exception,
+                })
+                .eq("id", tx.id);
+            }
+          }
+        }
+        showToast("Cambios aplicados a tu serie recurrente");
         return;
       }
 
@@ -585,17 +1110,56 @@ export function FinanceStoreProvider({
         ...updates,
         updated_at: nowIso,
       };
-      recordAuditEntries(existing, updatedTx);
+
       setTransactions((prev) =>
         prev.map((t) => (t.id === id ? updatedTx : t))
       );
+
+      if (user.isAuthenticated && workspaceId) {
+        await supabase
+          .from("transactions")
+          .update({
+            title: updatedTx.title,
+            category_id: updatedTx.category_id,
+            priority: updatedTx.priority,
+            status: updatedTx.status,
+            amount_type: updatedTx.amount_type,
+            estimated_amount: updatedTx.estimated_amount,
+            actual_amount: updatedTx.actual_amount,
+            expected_date: updatedTx.expected_date,
+            settled_date: updatedTx.settled_date,
+            settled_at: updatedTx.settled_at,
+            notes: updatedTx.notes,
+          })
+          .eq("id", id);
+      }
+
       showToast("Movimiento actualizado");
     },
-    [transactions, recurrenceRules, recordAuditEntries, showToast]
+    [
+      transactions,
+      recurrenceRules,
+      user.isAuthenticated,
+      workspaceId,
+      showToast,
+    ]
   );
 
+  // Eliminar movimiento
+  const deleteTransaction = useCallback(
+    async (id: string) => {
+      setTransactions((prev) => prev.filter((t) => t.id !== id));
+      if (user.isAuthenticated && workspaceId) {
+        await supabase.from("transactions").delete().eq("id", id);
+      }
+      showToast("Movimiento eliminado");
+    },
+    [user.isAuthenticated, workspaceId, showToast]
+  );
+
+  // Confirmar pago de gasto
   const confirmExpensePayment = useCallback(
-    ({
+    async ({
       transactionId,
       actualAmount,
       settledDate,
@@ -618,17 +1182,32 @@ export function FinanceStoreProvider({
         notes: notes !== undefined ? notes : existing.notes,
         updated_at: nowIso,
       };
-      recordAuditEntries(existing, updatedTx);
+
       setTransactions((prev) =>
         prev.map((t) => (t.id === transactionId ? updatedTx : t))
       );
+
+      if (user.isAuthenticated && workspaceId) {
+        await supabase
+          .from("transactions")
+          .update({
+            status: "paid",
+            actual_amount: actualAmount,
+            settled_date: settledDate,
+            settled_at: nowIso,
+            notes: updatedTx.notes,
+          })
+          .eq("id", transactionId);
+      }
+
       showToast(`Pago de "${existing.title}" confirmado`);
     },
-    [transactions, recordAuditEntries, showToast]
+    [transactions, user.isAuthenticated, workspaceId, showToast]
   );
 
+  // Confirmar recepción de ingreso
   const confirmIncomeReceipt = useCallback(
-    ({
+    async ({
       transactionId,
       actualAmount,
       settledDate,
@@ -651,17 +1230,31 @@ export function FinanceStoreProvider({
         notes: notes !== undefined ? notes : existing.notes,
         updated_at: nowIso,
       };
-      recordAuditEntries(existing, updatedTx);
+
       setTransactions((prev) =>
         prev.map((t) => (t.id === transactionId ? updatedTx : t))
       );
-      showToast(`Recepción de "${existing.title}" confirmada`);
+
+      if (user.isAuthenticated && workspaceId) {
+        await supabase
+          .from("transactions")
+          .update({
+            status: "received",
+            actual_amount: actualAmount,
+            settled_date: settledDate,
+            settled_at: nowIso,
+            notes: updatedTx.notes,
+          })
+          .eq("id", transactionId);
+      }
+
+      showToast(`Ingreso "${existing.title}" confirmado como recibido`);
     },
-    [transactions, recordAuditEntries, showToast]
+    [transactions, user.isAuthenticated, workspaceId, showToast]
   );
 
   const rescheduleTransaction = useCallback(
-    (transactionId: string, newExpectedDate: string) => {
+    async (transactionId: string, newExpectedDate: string) => {
       const existing = transactions.find((t) => t.id === transactionId);
       if (!existing) return;
       const nowIso = new Date().toISOString();
@@ -671,100 +1264,174 @@ export function FinanceStoreProvider({
             ? "overdue"
             : "pending"
           : "scheduled";
+
       const updatedTx: Transaction = {
         ...existing,
         expected_date: newExpectedDate,
         status: newStatus,
-        is_exception: existing.recurrence_rule_id ? true : existing.is_exception,
+        is_exception: existing.recurrence_rule_id
+          ? true
+          : existing.is_exception,
         updated_at: nowIso,
       };
-      recordAuditEntries(existing, updatedTx);
+
       setTransactions((prev) =>
         prev.map((t) => (t.id === transactionId ? updatedTx : t))
       );
-      showToast(`Reprogramado para el ${newExpectedDate}`);
+
+      if (user.isAuthenticated && workspaceId) {
+        await supabase
+          .from("transactions")
+          .update({
+            expected_date: newExpectedDate,
+            status: newStatus,
+            is_exception: updatedTx.is_exception,
+          })
+          .eq("id", transactionId);
+      }
+
+      showToast("Fecha reprogramada exitosamente");
     },
-    [transactions, referenceDate, recordAuditEntries, showToast]
+    [transactions, referenceDate, user.isAuthenticated, workspaceId, showToast]
   );
 
   const cancelTransaction = useCallback(
-    (transactionId: string) => {
+    async (transactionId: string) => {
       const existing = transactions.find((t) => t.id === transactionId);
       if (!existing) return;
       const nowIso = new Date().toISOString();
-      const updatedTx: Transaction = {
-        ...existing,
-        status: "cancelled",
-        updated_at: nowIso,
-      };
-      recordAuditEntries(existing, updatedTx);
       setTransactions((prev) =>
-        prev.map((t) => (t.id === transactionId ? updatedTx : t))
+        prev.map((t) =>
+          t.id === transactionId
+            ? { ...t, status: "cancelled", updated_at: nowIso }
+            : t
+        )
       );
+
+      if (user.isAuthenticated && workspaceId) {
+        await supabase
+          .from("transactions")
+          .update({ status: "cancelled" })
+          .eq("id", transactionId);
+      }
+
       showToast(`"${existing.title}" marcado como cancelado`);
     },
-    [transactions, recordAuditEntries, showToast]
+    [transactions, user.isAuthenticated, workspaceId, showToast]
   );
 
   const updateBudget = useCallback(
-    (updates: Partial<Budget>) => {
-      setBudget((prev) => ({
-        ...prev,
-        ...updates,
-      }));
-      showToast("Presupuesto mensual actualizado");
+    async (updates: Partial<Budget>) => {
+      const nextBudget = { ...budget, ...updates };
+      setBudget(nextBudget);
+
+      if (user.isAuthenticated && workspaceId) {
+        await supabase.from("budgets").upsert(
+          {
+            workspace_id: workspaceId,
+            month: nextBudget.month,
+            total_limit: nextBudget.total_limit,
+            alert_threshold_percent: nextBudget.alert_threshold_percent,
+            min_cushion_amount: nextBudget.min_cushion_amount,
+            min_cushion_percent: nextBudget.min_cushion_percent,
+          },
+          { onConflict: "workspace_id,month" }
+        );
+      }
+
+      showToast("Presupuesto mensual guardado");
     },
-    [showToast]
+    [budget, user.isAuthenticated, workspaceId, showToast]
   );
 
   const updateAccountOpeningBalance = useCallback(
-    (newBalance: number, newDate: string) => {
+    async (newBalance: number, newDate: string) => {
       const nowIso = new Date().toISOString();
-      setAuditLog((prev) => [
-        {
-          id: `audit-${Date.now()}`,
-          workspace_id: SOFIA_WORKSPACE_ID,
-          entity_type: "account",
-          entity_id: account.id,
-          field_changed: "opening_balance",
-          old_value: String(account.opening_balance),
-          new_value: String(newBalance),
-          changed_by: user.id,
-          changed_at: nowIso,
-        },
-        ...prev,
-      ]);
       setAccount((prev) => ({
         ...prev,
         opening_balance: newBalance,
         opening_balance_date: newDate,
         opening_balance_at: nowIso,
       }));
+
+      if (user.isAuthenticated && workspaceId && account.id !== "acc-empty") {
+        await supabase
+          .from("accounts")
+          .update({
+            opening_balance: newBalance,
+            opening_balance_date: newDate,
+            opening_balance_at: nowIso,
+          })
+          .eq("id", account.id);
+      }
+
       showToast("Saldo inicial y fecha de corte actualizados");
     },
-    [account.id, account.opening_balance, user.id, showToast]
+    [account.id, user.isAuthenticated, workspaceId, showToast]
   );
 
+  // Reglas recurrentes
   const createRecurrenceRule = useCallback(
-    (ruleData: Omit<RecurrenceRule, "id" | "workspace_id" | "account_id">) => {
-      const ruleId = `rule-${Date.now()}`;
+    async (
+      ruleData: Omit<RecurrenceRule, "id" | "workspace_id" | "account_id">
+    ) => {
+      const tempRuleId = crypto.randomUUID
+        ? crypto.randomUUID()
+        : `rule-${Date.now()}`;
+      let finalRuleId = tempRuleId;
+
       const newRule: RecurrenceRule = {
         ...ruleData,
-        id: ruleId,
-        workspace_id: SOFIA_WORKSPACE_ID,
+        id: tempRuleId,
+        workspace_id: workspaceId,
         account_id: account.id,
       };
+
       setRecurrenceRules((prev) => [newRule, ...prev]);
 
-      // Generar primera ocurrencia en el mes actual si está activa
+      if (user.isAuthenticated && workspaceId && account.id !== "acc-empty") {
+        const { data } = await supabase
+          .from("recurrence_rules")
+          .insert({
+            workspace_id: workspaceId,
+            account_id: account.id,
+            type: ruleData.type,
+            title: ruleData.title,
+            category_id: ruleData.category_id,
+            priority: ruleData.priority,
+            amount_type: ruleData.amount_type,
+            default_amount: ruleData.default_amount,
+            frequency: ruleData.frequency,
+            interval_count: ruleData.interval_count,
+            day_of_month: ruleData.day_of_month,
+            semimonthly_days: ruleData.semimonthly_days,
+            day_of_week: ruleData.day_of_week,
+            start_date: ruleData.start_date,
+            end_date: ruleData.end_date,
+            status: ruleData.status,
+            notes: ruleData.notes,
+          })
+          .select("*")
+          .single();
+
+        if (data) {
+          finalRuleId = data.id;
+          setRecurrenceRules((prev) =>
+            prev.map((r) => (r.id === tempRuleId ? { ...r, id: data.id } : r))
+          );
+        }
+      }
+
+      // Generar ocurrencia automática en el mes actual si está activa
       if (newRule.status === "active") {
-        const day = String(newRule.day_of_month || 15).padStart(2, "0");
-        const expDate = `${currentYearMonth}-${day}`;
-        const nowIso = new Date().toISOString();
-        const occTx: Transaction = {
-          id: `tx-occ-${Date.now()}`,
-          workspace_id: SOFIA_WORKSPACE_ID,
-          account_id: account.id,
+        const [y, m] = currentYearMonth.split("-").map(Number);
+        const maxDay = getDaysInMonth(y, m);
+        const clampedDay = String(
+          Math.min(newRule.day_of_month || 15, maxDay)
+        ).padStart(2, "0");
+        const expDate = `${currentYearMonth}-${clampedDay}`;
+
+        await createTransaction({
           type: newRule.type,
           title: newRule.title,
           category_id: newRule.category_id,
@@ -781,27 +1448,32 @@ export function FinanceStoreProvider({
           expected_date: expDate,
           settled_date: null,
           settled_at: null,
-          recurrence_rule_id: ruleId,
+          recurrence_rule_id: finalRuleId,
           occurrence_date: expDate,
           is_exception: false,
           notes: newRule.notes,
-          created_at: nowIso,
-          updated_at: nowIso,
-        };
-        setTransactions((prev) => [occTx, ...prev]);
+        });
       }
 
       showToast(`Regla recurrente "${newRule.title}" creada`);
     },
-    [account.id, currentYearMonth, referenceDate, showToast]
+    [
+      workspaceId,
+      account.id,
+      user.isAuthenticated,
+      currentYearMonth,
+      referenceDate,
+      createTransaction,
+      showToast,
+    ]
   );
 
   const updateRecurrenceRule = useCallback(
-    (id: string, updates: Partial<RecurrenceRule>) => {
+    async (id: string, updates: Partial<RecurrenceRule>) => {
       setRecurrenceRules((prev) =>
         prev.map((r) => (r.id === id ? { ...r, ...updates } : r))
       );
-      // Actualizar también ocurrencias futuras pendientes no pagadas
+
       setTransactions((prev) =>
         prev.map((tx) => {
           if (tx.recurrence_rule_id !== id) return tx;
@@ -822,252 +1494,303 @@ export function FinanceStoreProvider({
           };
         })
       );
+
+      if (user.isAuthenticated && workspaceId) {
+        await supabase
+          .from("recurrence_rules")
+          .update({
+            title: updates.title,
+            default_amount: updates.default_amount,
+            amount_type: updates.amount_type,
+            frequency: updates.frequency,
+            day_of_month: updates.day_of_month,
+            priority: updates.priority,
+            category_id: updates.category_id,
+            notes: updates.notes,
+          })
+          .eq("id", id);
+      }
+
       showToast("Regla recurrente actualizada");
     },
-    [showToast]
+    [user.isAuthenticated, workspaceId, showToast]
+  );
+
+  const deleteRecurrenceRule = useCallback(
+    async (id: string) => {
+      setRecurrenceRules((prev) => prev.filter((r) => r.id !== id));
+      if (user.isAuthenticated && workspaceId) {
+        await supabase.from("recurrence_rules").delete().eq("id", id);
+      }
+      showToast("Regla recurrente eliminada");
+    },
+    [user.isAuthenticated, workspaceId, showToast]
   );
 
   const toggleRecurrenceRuleStatus = useCallback(
-    (id: string) => {
+    async (id: string) => {
+      const target = recurrenceRules.find((r) => r.id === id);
+      if (!target) return;
+      const nextStatus = target.status === "active" ? "paused" : "active";
+
       setRecurrenceRules((prev) =>
-        prev.map((r) => {
-          if (r.id !== id) return r;
-          const nextStatus = r.status === "active" ? "paused" : "active";
-          showToast(
-            nextStatus === "paused"
-              ? `"${r.title}" pausada (conserva historial)`
-              : `"${r.title}" reactivada`
-          );
-          return { ...r, status: nextStatus };
-        })
+        prev.map((r) => (r.id === id ? { ...r, status: nextStatus } : r))
+      );
+
+      if (user.isAuthenticated && workspaceId) {
+        await supabase
+          .from("recurrence_rules")
+          .update({ status: nextStatus })
+          .eq("id", id);
+      }
+
+      showToast(
+        nextStatus === "paused"
+          ? `"${target.title}" pausada (conserva tu historial)`
+          : `"${target.title}" reactivada`
       );
     },
-    [showToast]
+    [recurrenceRules, user.isAuthenticated, workspaceId, showToast]
   );
 
   const createCategory = useCallback(
-    (catData: Omit<Category, "id" | "workspace_id" | "sort_order">) => {
+    async (catData: Omit<Category, "id" | "workspace_id" | "sort_order">) => {
+      const tempId = crypto.randomUUID
+        ? crypto.randomUUID()
+        : `cat-${Date.now()}`;
       const newCat: Category = {
         ...catData,
-        id: `cat-${Date.now()}`,
-        workspace_id: SOFIA_WORKSPACE_ID,
+        id: tempId,
+        workspace_id: workspaceId,
         sort_order: categories.length + 1,
       };
       setCategories((prev) => [...prev, newCat]);
+
+      if (user.isAuthenticated && workspaceId) {
+        const { data } = await supabase
+          .from("categories")
+          .insert({
+            workspace_id: workspaceId,
+            name: catData.name,
+            kind: catData.kind,
+            default_priority: catData.default_priority,
+            icon: catData.icon,
+            color_token: catData.color_token,
+            sort_order: newCat.sort_order,
+            is_active: true,
+          })
+          .select("*")
+          .single();
+
+        if (data) {
+          setCategories((prev) =>
+            prev.map((c) => (c.id === tempId ? { ...c, id: data.id } : c))
+          );
+        }
+      }
+
       showToast(`Categoría "${newCat.name}" creada`);
     },
-    [categories.length, showToast]
+    [categories.length, workspaceId, user.isAuthenticated, showToast]
   );
 
   const updateCategory = useCallback(
-    (id: string, updates: Partial<Category>) => {
+    async (id: string, updates: Partial<Category>) => {
       setCategories((prev) =>
         prev.map((c) => (c.id === id ? { ...c, ...updates } : c))
       );
+
+      if (user.isAuthenticated && workspaceId) {
+        await supabase
+          .from("categories")
+          .update({
+            name: updates.name,
+            kind: updates.kind,
+            default_priority: updates.default_priority,
+            is_active: updates.is_active,
+          })
+          .eq("id", id);
+      }
+
       showToast("Categoría actualizada");
     },
-    [showToast]
+    [user.isAuthenticated, workspaceId, showToast]
   );
 
-  const markNotificationAsRead = useCallback((id: string) => {
-    const nowIso = new Date().toISOString();
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read_at: nowIso } : n))
-    );
-  }, []);
+  const markNotificationAsRead = useCallback(
+    async (id: string) => {
+      const nowIso = new Date().toISOString();
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, read_at: nowIso } : n))
+      );
+      if (user.isAuthenticated && workspaceId) {
+        await supabase
+          .from("notifications")
+          .update({ read_at: nowIso })
+          .eq("id", id);
+      }
+    },
+    [user.isAuthenticated, workspaceId]
+  );
 
-  const markAllNotificationsAsRead = useCallback(() => {
+  const markAllNotificationsAsRead = useCallback(async () => {
     const nowIso = new Date().toISOString();
     setNotifications((prev) =>
       prev.map((n) => (n.read_at ? n : { ...n, read_at: nowIso }))
     );
+    if (user.isAuthenticated && workspaceId) {
+      await supabase
+        .from("notifications")
+        .update({ read_at: nowIso })
+        .eq("workspace_id", workspaceId)
+        .is("read_at", null);
+    }
     showToast("Todos los avisos marcados como leídos");
-  }, [showToast]);
+  }, [user.isAuthenticated, workspaceId, showToast]);
 
   const resetFilters = useCallback(() => {
     setFilters(DEFAULT_FILTERS);
   }, []);
 
-  const completeOnboarding = useCallback(() => {
-    setAccount((prev) => ({
-      ...prev,
-      opening_balance: onboardingDraft.openingBalance,
-      opening_balance_date: onboardingDraft.openingDate,
-      opening_balance_at: new Date().toISOString(),
-    }));
-    setBudget((prev) => ({
-      ...prev,
+  // Finalizar los 5 pasos de Onboarding (guardando en Supabase y abriendo el Tutorial Interactivo)
+  const completeOnboarding = useCallback(async () => {
+    const nowIso = new Date().toISOString();
+
+    await updateAccountOpeningBalance(
+      onboardingDraft.openingBalance,
+      onboardingDraft.openingDate
+    );
+
+    const minCushion = Math.round(onboardingDraft.monthlyBudget * 0.1);
+    await updateBudget({
       total_limit: onboardingDraft.monthlyBudget,
       alert_threshold_percent: onboardingDraft.alertThresholdPercent,
-      min_cushion_amount: Math.round(onboardingDraft.monthlyBudget * 0.1),
-    }));
-    setActiveScreen("P10");
-    showToast("¡Configuración inicial completada! Bienvenida a tu calendario.");
-  }, [onboardingDraft, setActiveScreen, showToast]);
+      min_cushion_amount: minCushion,
+      min_cushion_percent: 10,
+    });
 
-  const resetToSofiaMasterDataset = useCallback(() => {
-    setAccount(SOFIA_ACCOUNT);
-    setBudget(SOFIA_BUDGET);
-    setCategories(SOFIA_CATEGORIES);
-    setRecurrenceRules(SOFIA_RECURRENCE_RULES);
-    setTransactions(SOFIA_TRANSACTIONS);
-    setNotifications(SOFIA_NOTIFICATIONS);
-    setAuditLog(SOFIA_AUDIT_LOG);
-    setCurrentYearMonth("2026-11");
-    setSelectedDate("2026-11-17");
-    setSelectedTransactionId("tx-exp-05");
-    setFilters(DEFAULT_FILTERS);
+    // Crear reglas de ingresos iniciales agregadas en Onboarding Paso 4
+    const incomeCatId =
+      categories.find((c) => c.kind === "income")?.id ||
+      categories[0]?.id ||
+      null;
+
+    for (const inc of onboardingDraft.incomes) {
+      if (inc.amount > 0) {
+        await createRecurrenceRule({
+          type: "income",
+          title: inc.title,
+          category_id: incomeCatId,
+          priority: "essential",
+          amount_type: "fixed",
+          default_amount: inc.amount,
+          frequency:
+            inc.frequency === "semimonthly" ? "semimonthly" : "monthly",
+          interval_count: 1,
+          day_of_month: inc.dayOfMonth || 15,
+          semimonthly_days: inc.frequency === "semimonthly" ? "15,last" : null,
+          day_of_week: null,
+          start_date: `${currentYearMonth}-01`,
+          end_date: null,
+          status: "active",
+          notes: "Configurado durante tu bienvenida",
+        });
+
+        // Si es quincenal, crear también la ocurrencia de fin de mes
+        if (inc.frequency === "semimonthly") {
+          const [y, m] = currentYearMonth.split("-").map(Number);
+          const endDay = String(getDaysInMonth(y, m)).padStart(2, "0");
+          const endDate = `${currentYearMonth}-${endDay}`;
+          await createTransaction({
+            type: "income",
+            title: `${inc.title} (2ª quincena)`,
+            category_id: incomeCatId,
+            priority: "essential",
+            status: "scheduled",
+            amount_type: "fixed",
+            estimated_amount: inc.amount,
+            actual_amount: null,
+            expected_date: endDate,
+            settled_date: null,
+            settled_at: null,
+            recurrence_rule_id: null,
+            occurrence_date: null,
+            is_exception: false,
+            notes: "Segunda quincena del mes",
+          });
+        }
+      }
+    }
+
+    // Crear reglas de gastos fijos recurrentes agregadas en Onboarding Paso 5
+    for (const exp of onboardingDraft.fixedExpenses) {
+      if (exp.amount > 0) {
+        await createRecurrenceRule({
+          type: "expense",
+          title: exp.title,
+          category_id: exp.categoryId || categories[0]?.id || null,
+          priority: exp.priority,
+          amount_type: exp.amountType,
+          default_amount: exp.amount,
+          frequency: "monthly",
+          interval_count: 1,
+          day_of_month: exp.dayOfMonth || 1,
+          semimonthly_days: null,
+          day_of_week: null,
+          start_date: `${currentYearMonth}-01`,
+          end_date: null,
+          status: "active",
+          notes: "Compromiso mensual recurrente",
+        });
+      }
+    }
+
+    if (user.isAuthenticated && user.id) {
+      await supabase
+        .from("users")
+        .update({ onboarding_completed: true })
+        .eq("id", user.id);
+
+      setUser((prev) => ({ ...prev, onboardingCompleted: true }));
+    }
+
+    setActiveScreenState("P10");
+    setIsTutorialOpen(true);
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      if (user.id) {
+        localStorage.setItem(`${TUTORIAL_SEEN_PREFIX}${user.id}`, nowIso);
+      }
     } catch {
       // ignore
     }
-    showToast("Dataset Maestro de Sofía (PRD 8.3) restaurado");
-  }, [showToast]);
-
-  const loginWithEmail = useCallback(
-    async (email: string, password?: string) => {
-      if (password && password.length >= 6) {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (!error && data.user) {
-          setUser({
-            id: data.user.id,
-            name:
-              data.user.user_metadata?.full_name ||
-              email.split("@")[0] ||
-              "Sofía",
-            email: data.user.email || email,
-            isSupabaseAuthenticated: true,
-          });
-          setActiveScreen("P10");
-          showToast("Sesión iniciada con Supabase Auth");
-          return { ok: true };
-        }
-      }
-      // Modo interactivo directo si usa credenciales de prueba
-      setUser({
-        id: SOFIA_USER_ID,
-        name: email.split("@")[0] || "Sofía Ramírez",
-        email: email || "sofia.ramirez@ejemplo.mx",
-        isSupabaseAuthenticated: false,
-      });
-      setActiveScreen("P10");
-      showToast("Sesión iniciada en tu espacio financiero");
-      return { ok: true };
-    },
-    [setActiveScreen, showToast]
-  );
-
-  const registerWithEmail = useCallback(
-    async (name: string, email: string, password?: string) => {
-      if (password && password.length >= 8) {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { full_name: name },
-          },
-        });
-        if (!error && data.user) {
-          setUser({
-            id: data.user.id,
-            name: name || email.split("@")[0],
-            email,
-            isSupabaseAuthenticated: true,
-          });
-          setActiveScreen("P05");
-          showToast("Cuenta registrada en Supabase. Configura tu saldo inicial.");
-          return { ok: true };
-        }
-      }
-      setUser({
-        id: SOFIA_USER_ID,
-        name: name || "Sofía Ramírez",
-        email: email || "sofia.ramirez@ejemplo.mx",
-        isSupabaseAuthenticated: false,
-      });
-      setActiveScreen("P05");
-      showToast("Cuenta creada. Completa los 5 pasos de configuración.");
-      return { ok: true };
-    },
-    [setActiveScreen, showToast]
-  );
-
-  const logout = useCallback(async () => {
-    await supabase.auth.signOut();
-    setUser((prev) => ({ ...prev, isSupabaseAuthenticated: false }));
-    setActiveScreen("P01");
-    showToast("Sesión cerrada");
-  }, [setActiveScreen, showToast]);
+    showToast("¡Tu espacio financiero está listo!");
+  }, [
+    onboardingDraft,
+    updateAccountOpeningBalance,
+    updateBudget,
+    categories,
+    createRecurrenceRule,
+    createTransaction,
+    currentYearMonth,
+    user.isAuthenticated,
+    user.id,
+    showToast,
+  ]);
 
   const syncWithSupabase = useCallback(async () => {
-    setIsSyncing(true);
-    setSyncStatusMessage("Verificando conexión con Supabase...");
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session?.user) {
-        setIsSyncing(false);
-        const msg =
-          "Proyecto Supabase (beqpktixfijdzjdtrxsz) conectado. Inicia sesión con cuenta Supabase en P02/P03 para sincronizar en la nube.";
-        setSyncStatusMessage(msg);
-        showToast("Conexión a Supabase verificada");
-        return { ok: true, message: msg };
-      }
-
-      const authUserId = sessionData.session.user.id;
-      const { data: wsList, error: wsErr } = await supabase
-        .from("workspaces")
-        .select("id")
-        .eq("owner_user_id", authUserId)
-        .limit(1);
-
-      if (wsErr) throw wsErr;
-
-      const workspaceId = wsList?.[0]?.id;
-      if (!workspaceId) {
-        setIsSyncing(false);
-        const msg = "Espacio de trabajo listo en Supabase.";
-        setSyncStatusMessage(msg);
-        return { ok: true, message: msg };
-      }
-
-      await supabase
-        .from("accounts")
-        .update({
-          opening_balance: account.opening_balance,
-          opening_balance_date: account.opening_balance_date,
-          opening_balance_at: account.opening_balance_at,
-        })
-        .eq("workspace_id", workspaceId);
-
-      await supabase.from("budgets").upsert(
-        {
-          workspace_id: workspaceId,
-          month: budget.month,
-          total_limit: budget.total_limit,
-          alert_threshold_percent: budget.alert_threshold_percent,
-          min_cushion_amount: budget.min_cushion_amount,
-          min_cushion_percent: budget.min_cushion_percent,
-        },
-        { onConflict: "workspace_id,month" }
-      );
-
-      setIsSyncing(false);
-      const msg = "Sincronizado con Supabase (beqpktixfijdzjdtrxsz) exitosamente.";
-      setSyncStatusMessage(msg);
-      showToast("Datos sincronizados con Supabase");
-      return { ok: true, message: msg };
-    } catch (err) {
-      setIsSyncing(false);
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session?.user) {
       const msg =
-        err instanceof Error ? err.message : "Error al sincronizar con Supabase";
+        "Inicia sesión o regístrate para sincronizar tus finanzas en la nube.";
       setSyncStatusMessage(msg);
       return { ok: false, message: msg };
     }
-  }, [account, budget, showToast]);
+    await loadUserWorkspaceFromSupabase(sessionData.session.user);
+    const msg = "Tus datos están sincronizados y respaldados en la nube.";
+    setSyncStatusMessage(msg);
+    showToast("Sincronización completada");
+    return { ok: true, message: msg };
+  }, [loadUserWorkspaceFromSupabase, showToast]);
 
   const value = useMemo<FinanceStoreContextValue>(
     () => ({
@@ -1075,9 +1798,18 @@ export function FinanceStoreProvider({
       setActiveScreen,
       previousScreen,
       goBack,
+      theme,
+      toggleTheme,
+      setTheme,
+      isTutorialOpen,
+      setIsTutorialOpen,
+      isInitializingAuth,
       user,
+      workspaceId,
       loginWithEmail,
       registerWithEmail,
+      signInWithGoogle,
+      sendPasswordResetEmail,
       logout,
       syncWithSupabase,
       isSyncing,
@@ -1099,7 +1831,7 @@ export function FinanceStoreProvider({
       budget,
       categories,
       recurrenceRules,
-      transactions: effectiveTransactions,
+      transactions,
       notifications,
       auditLog,
       monthProjection,
@@ -1113,6 +1845,7 @@ export function FinanceStoreProvider({
       completeOnboarding,
       createTransaction,
       updateTransaction,
+      deleteTransaction,
       confirmExpensePayment,
       confirmIncomeReceipt,
       rescheduleTransaction,
@@ -1121,14 +1854,12 @@ export function FinanceStoreProvider({
       updateAccountOpeningBalance,
       createRecurrenceRule,
       updateRecurrenceRule,
+      deleteRecurrenceRule,
       toggleRecurrenceRuleStatus,
       createCategory,
       updateCategory,
       markNotificationAsRead,
       markAllNotificationsAsRead,
-      resetToSofiaMasterDataset,
-      pendingRecurrenceEdit,
-      setPendingRecurrenceEdit,
       toastMessage,
       showToast,
     }),
@@ -1137,9 +1868,17 @@ export function FinanceStoreProvider({
       setActiveScreen,
       previousScreen,
       goBack,
+      theme,
+      toggleTheme,
+      setTheme,
+      isTutorialOpen,
+      isInitializingAuth,
       user,
+      workspaceId,
       loginWithEmail,
       registerWithEmail,
+      signInWithGoogle,
+      sendPasswordResetEmail,
       logout,
       syncWithSupabase,
       isSyncing,
@@ -1156,7 +1895,7 @@ export function FinanceStoreProvider({
       budget,
       categories,
       recurrenceRules,
-      effectiveTransactions,
+      transactions,
       notifications,
       auditLog,
       monthProjection,
@@ -1168,6 +1907,7 @@ export function FinanceStoreProvider({
       completeOnboarding,
       createTransaction,
       updateTransaction,
+      deleteTransaction,
       confirmExpensePayment,
       confirmIncomeReceipt,
       rescheduleTransaction,
@@ -1176,13 +1916,12 @@ export function FinanceStoreProvider({
       updateAccountOpeningBalance,
       createRecurrenceRule,
       updateRecurrenceRule,
+      deleteRecurrenceRule,
       toggleRecurrenceRuleStatus,
       createCategory,
       updateCategory,
       markNotificationAsRead,
       markAllNotificationsAsRead,
-      resetToSofiaMasterDataset,
-      pendingRecurrenceEdit,
       toastMessage,
       showToast,
     ]
