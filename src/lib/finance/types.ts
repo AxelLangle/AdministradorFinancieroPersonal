@@ -31,6 +31,8 @@ export type RecurrenceEditScope =
 
 export type TrafficLightColor = "green" | "amber" | "red";
 
+export type ThemeMode = "light" | "dark";
+
 export type ScreenId =
   | "P01" // Bienvenida
   | "P02" // Registro
@@ -42,7 +44,7 @@ export type ScreenId =
   | "P08" // Onboarding Paso 4: Primeros ingresos
   | "P09" // Onboarding Paso 5: Gastos fijos recurrentes
   | "P10" // Inicio / Calendario mensual
-  | "P11" // Detalle del día (Bottom Sheet)
+  | "P11" // Detalle del día
   | "P12" // Nuevo gasto (Pendiente)
   | "P12B" // Nuevo gasto (Pagado)
   | "P13" // Nuevo ingreso (Programado)
@@ -52,9 +54,9 @@ export type ScreenId =
   | "P16" // Confirmar recepción de ingreso
   | "P17" // Alcance de edición recurrente
   | "P18" // Movimientos
-  | "P19" // Filtros (Bottom Sheet)
+  | "P19" // Filtros
   | "P20" // Presupuesto
-  | "P21" // Editar presupuesto (Bottom Sheet)
+  | "P21" // Editar presupuesto
   | "P22" // Recurrentes
   | "P23" // Nueva regla recurrente
   | "P24" // Editar regla recurrente
@@ -64,9 +66,10 @@ export type ScreenId =
   | "P28" // Menú Más
   | "P29" // Configuración
   | "P30" // Centro de avisos
-  | "P31" // Inicio vacío (Estado especial)
-  | "P32" // Inicio con proyección incompleta (Estado especial)
-  | "P33"; // Error de conexión (Estado especial)
+  | "P31" // Inicio vacío
+  | "P32" // Proyección incompleta
+  | "P33" // Modo sin conexión
+  | "MANUAL"; // Manual Completo de Uso y Ayuda
 
 export interface Account {
   id: string;
@@ -105,7 +108,7 @@ export interface RecurrenceRule {
   frequency: RecurrenceFrequency;
   interval_count: number;
   day_of_month: number | null;
-  semimonthly_days: string | null; // e.g., '15,last'
+  semimonthly_days: string | null;
   day_of_week: number | null;
   start_date: string; // YYYY-MM-DD
   end_date: string | null; // YYYY-MM-DD
@@ -141,9 +144,9 @@ export interface Budget {
   workspace_id: string;
   month: string; // YYYY-MM-01
   total_limit: number;
-  alert_threshold_percent: number; // Default 80
+  alert_threshold_percent: number;
   min_cushion_amount: number | null;
-  min_cushion_percent: number; // Default 10
+  min_cushion_percent: number;
 }
 
 export interface AppNotification {
@@ -186,7 +189,7 @@ export interface TransactionFilters {
 }
 
 export interface DailyProjectionPoint {
-  date: string; // YYYY-MM-DD
+  date: string;
   dayNumber: number;
   incomesTotal: number;
   expensesTotal: number;
@@ -197,7 +200,7 @@ export interface DailyProjectionPoint {
 }
 
 export interface MonthProjectionSummary {
-  yearMonth: string; // YYYY-MM
+  yearMonth: string;
   periodRelationship: "past" | "current" | "future";
   startingBalance: number | null;
   currentBalance: number;
