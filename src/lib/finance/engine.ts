@@ -47,6 +47,24 @@ export function roundCurrency(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+/**
+ * Formatea un número con comas cada 3 dígitos y punto para separar 2 decimales de centavos (ej. 12,345.67).
+ * No depende de variaciones de locale del navegador.
+ */
+export function formatNumberWithCommas(
+  value: number | null | undefined,
+  decimals = 2
+): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "0.00";
+  }
+  const absVal = Math.abs(roundCurrency(value));
+  const fixed = absVal.toFixed(decimals);
+  const [intPart, decPart] = fixed.split(".");
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return decPart !== undefined ? `${withCommas}.${decPart}` : withCommas;
+}
+
 export function formatMXN(
   amount: number | null | undefined,
   options?: {
@@ -59,11 +77,7 @@ export function formatMXN(
   if (amount === null || amount === undefined || Number.isNaN(amount)) {
     return "Monto por definir";
   }
-  const absVal = Math.abs(roundCurrency(amount));
-  const formattedNumber = absVal.toLocaleString("es-MX", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  const formattedNumber = formatNumberWithCommas(amount, 2);
 
   const prefix = options?.showPrefix !== false ? "MXN " : "";
   const approx = options?.approximate ? "~" : "";
@@ -75,6 +89,20 @@ export function formatMXN(
   }
 
   return `${sign}${prefix}${approx}$${formattedNumber}`;
+}
+
+export function getTodayMexicoCity(): string {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Mexico_City",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    return formatter.format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
 }
 
 export function formatDateDDMMYYYY(dateStr: string | null | undefined): string {
@@ -183,12 +211,10 @@ export function isIncomeDelayed(
 }
 
 /**
- * Regla de corte del saldo inicial (PRD 4.1, 4.6, 8.2):
+ * Regla de corte del saldo inicial:
  * Un movimiento confirmado (pagado o recibido) modifica el saldo actual si y solo si:
  * - settled_date > opening_balance_date, O
  * - settled_date == opening_balance_date Y settled_at > opening_balance_at.
- * Los movimientos con settled_date anterior a opening_balance_date ya están contenidos
- * dentro del saldo inicial de la cuenta y no lo vuelven a sumar ni restar.
  */
 export function affectsCurrentBalance(
   tx: Transaction,
@@ -207,7 +233,6 @@ export function affectsCurrentBalance(
     return false;
   }
 
-  // Mismo día: comparar marca de tiempo técnica (settled_at vs opening_balance_at)
   if (!tx.settled_at || !account.opening_balance_at) {
     return false;
   }
@@ -245,12 +270,9 @@ export function calculateCurrentBalance(
   return balance;
 }
 
-/**
- * Calcula la proyección completa de un mes, curva diaria de saldo y semáforo (PRD 4.1, 4.3, 4.7, 8.3).
- */
 export function calculateMonthProjection(params: {
   yearMonth: string;
-  referenceDate: string; // YYYY-MM-DD (ej. '2026-11-18')
+  referenceDate: string;
   account: Account;
   transactions: Transaction[];
   budget?: Budget | null;
@@ -263,14 +285,15 @@ export function calculateMonthProjection(params: {
   const currentBalance = calculateCurrentBalance(account, transactions);
   const minCushionAmount = roundCurrency(
     budget?.min_cushion_amount ??
-      (budget?.total_limit ? budget.total_limit * ((budget.min_cushion_percent || 10) / 100) : 2000)
+      (budget?.total_limit
+        ? budget.total_limit * ((budget.min_cushion_percent || 10) / 100)
+        : 0)
   );
 
   let periodRelationship: "past" | "current" | "future" = "current";
   if (yearMonth < currentYearMonth) periodRelationship = "past";
   else if (yearMonth > currentYearMonth) periodRelationship = "future";
 
-  // Transacciones cuyo mes efectivo cae en este yearMonth
   const monthTransactions = transactions.filter((tx) => {
     if (tx.account_id !== account.id) return false;
     if (tx.status === "cancelled") return false;
@@ -278,14 +301,12 @@ export function calculateMonthProjection(params: {
     return effDate >= startDate && effDate <= endDate;
   });
 
-  // 1. Ingresos recibidos en el mes
   const receivedIncome = roundCurrency(
     monthTransactions
       .filter((tx) => tx.type === "income" && tx.status === "received")
       .reduce((sum, tx) => sum + getEffectiveAmount(tx), 0)
   );
 
-  // 2. Ingresos atrasados en el mes (programados con fecha < referenceDate): NO se suman al proyectado (PRD 4.1 y 4.2)
   const delayedIncomesList = monthTransactions.filter(
     (tx) => tx.type === "income" && isIncomeDelayed(tx, referenceDate)
   );
@@ -293,7 +314,6 @@ export function calculateMonthProjection(params: {
     delayedIncomesList.reduce((sum, tx) => sum + getEffectiveAmount(tx), 0)
   );
 
-  // 3. Ingresos programados vigentes en el mes (fecha >= referenceDate en mes actual, o todos los programados en mes futuro)
   const scheduledIncome = roundCurrency(
     monthTransactions
       .filter(
@@ -305,15 +325,12 @@ export function calculateMonthProjection(params: {
       .reduce((sum, tx) => sum + getEffectiveAmount(tx), 0)
   );
 
-  // 4. Gastos pagados en el mes
   const paidExpense = roundCurrency(
     monthTransactions
       .filter((tx) => tx.type === "expense" && tx.status === "paid")
       .reduce((sum, tx) => sum + getEffectiveAmount(tx), 0)
   );
 
-  // 5. Gastos pendientes y vencidos aplicables al mes
-  // En el mes actual incluye gastos vencidos aún no resueltos (incluso de meses previos si existieran) + pendientes hasta fin de mes
   const pendingExpensesList = transactions.filter((tx) => {
     if (tx.account_id !== account.id) return false;
     if (tx.type !== "expense") return false;
@@ -345,7 +362,6 @@ export function calculateMonthProjection(params: {
 
   const committedExpense = roundCurrency(paidExpense + pendingExpense);
 
-  // Continuidad mes a mes (PRD 4.7)
   if (periodRelationship === "past") {
     const openingDate = account.opening_balance_date.slice(0, 10);
     if (endDate < openingDate) {
@@ -394,11 +410,9 @@ export function calculateMonthProjection(params: {
     startingBalance + scheduledIncome - pendingExpense
   );
 
-  // Construcción de la curva diaria del mes (para encontrar el punto más bajo del mes y evaluar el semáforo)
   const dailyCurve: DailyProjectionPoint[] = [];
   let runningBalance = startingBalance;
 
-  // En el mes actual, los gastos vencidos previos a referenceDate impactan desde referenceDate
   let lowestBalancePoint: { date: string; balance: number } = {
     date: periodRelationship === "current" ? referenceDate : startDate,
     balance: startingBalance,
@@ -419,7 +433,6 @@ export function calculateMonthProjection(params: {
 
     if (periodRelationship === "current") {
       if (dateStr === referenceDate) {
-        // En el día de hoy se consideran los gastos vencidos no resueltos + los pendientes de hoy + ingresos programados para hoy
         for (const overdueTx of overdueExpensesList) {
           dayExpenses = roundCurrency(
             dayExpenses + getEffectiveAmount(overdueTx)
@@ -430,7 +443,11 @@ export function calculateMonthProjection(params: {
 
       if (dateStr >= referenceDate) {
         for (const tx of dayTxs) {
-          if (tx.type === "income" && tx.status === "scheduled" && !isIncomeDelayed(tx, referenceDate)) {
+          if (
+            tx.type === "income" &&
+            tx.status === "scheduled" &&
+            !isIncomeDelayed(tx, referenceDate)
+          ) {
             dayIncomes = roundCurrency(dayIncomes + getEffectiveAmount(tx));
           } else if (
             tx.type === "expense" &&
@@ -478,12 +495,11 @@ export function calculateMonthProjection(params: {
     });
   }
 
-  // Semáforo del saldo proyectado (PRD 4.3)
   let balanceTrafficLight: TrafficLightColor = "green";
   if (projectedClosingBalance < 0 || lowestBalancePoint.balance < 0) {
     balanceTrafficLight = "red";
   } else if (
-    lowestBalancePoint.balance < minCushionAmount ||
+    (minCushionAmount > 0 && lowestBalancePoint.balance < minCushionAmount) ||
     hasUnquantifiedPendingExpenses
   ) {
     balanceTrafficLight = "amber";
@@ -516,9 +532,6 @@ export function calculateMonthProjection(params: {
   };
 }
 
-/**
- * Calcula el resumen del presupuesto mensual y su desglose por prioridad (PRD 4.1, 4.3, P20).
- */
 export function calculateBudgetSummary(params: {
   yearMonth: string;
   referenceDate: string;
@@ -566,9 +579,9 @@ export function calculateBudgetSummary(params: {
 
   const threshold = budget.alert_threshold_percent || 80;
   let trafficLight: TrafficLightColor = "green";
-  if (committedPercent > 100) {
+  if (totalLimit > 0 && committedPercent > 100) {
     trafficLight = "red";
-  } else if (committedPercent >= threshold) {
+  } else if (totalLimit > 0 && committedPercent >= threshold) {
     trafficLight = "amber";
   }
 
@@ -618,9 +631,6 @@ export function calculateBudgetSummary(params: {
   };
 }
 
-/**
- * Calcula la tarjeta "Hasta tu próximo ingreso" y el punto más bajo del mes (P20, PRD 8.3).
- */
 export function calculateNextIncomeStretch(params: {
   yearMonth: string;
   referenceDate: string;
@@ -693,9 +703,6 @@ export function calculateNextIncomeStretch(params: {
   };
 }
 
-/**
- * Filtra transacciones combinando búsqueda, tipo, estado, prioridad, categoría y recurrencia (P18, P19).
- */
 export function filterTransactions(
   transactions: Transaction[],
   filters: TransactionFilters,
@@ -747,12 +754,6 @@ export function filterTransactions(
   });
 }
 
-/**
- * Aplica el alcance de edición de una ocurrencia recurrente (P17, PRD 4.4):
- * - "single": Solo este pago/ingreso (marca is_exception = true)
- * - "future": Este y los siguientes (actualiza pendientes con occurrence_date >= fecha objetivo; nunca toca pagados/recibidos)
- * - "all_pending": Todos los pendientes (actualiza todos los pendientes/programados/vencidos de la regla; nunca toca pagados/recibidos)
- */
 export function applyRecurrenceEditScope(params: {
   transactions: Transaction[];
   rules: RecurrenceRule[];
@@ -787,7 +788,6 @@ export function applyRecurrenceEditScope(params: {
   const nowIso = new Date().toISOString();
 
   const updatedTransactions = transactions.map((tx) => {
-    // Nunca modificar ocurrencias ya pagadas o recibidas mediante alcances masivos
     const isSettled = tx.status === "paid" || tx.status === "received";
 
     if (scope === "single") {
@@ -807,7 +807,6 @@ export function applyRecurrenceEditScope(params: {
     const txOccDate = (tx.occurrence_date || tx.expected_date).slice(0, 10);
 
     if (scope === "future" && txOccDate >= targetOccDate) {
-      // Si se cambia el día del mes en expected_date, ajustar el día manteniendo el mes de cada ocurrencia futura
       let newExpectedDate = tx.expected_date;
       if (updates.expected_date && tx.id === targetTransactionId) {
         newExpectedDate = updates.expected_date;
