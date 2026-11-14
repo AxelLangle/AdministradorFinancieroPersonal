@@ -16,6 +16,19 @@
   --semantic-info: #527A9A;
 }
 
+html.dark {
+  --bg-canvas: #121815;
+  --bg-surface: #1A231E;
+  --bg-field: #222E28;
+  --border-subtle: #2D3B34;
+  --text-primary: #F2F0E8;
+  --text-secondary: #9CA9A1;
+  --brand-primary: #4A6B5B;
+  --brand-sage: #91A68C;
+  --brand-beige: #2B3831;
+  color-scheme: dark;
+}
+
 html,
 body {
   background-color: var(--bg-canvas);
@@ -24,8 +37,105 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+/* Adaptación integral de Modo Oscuro (Warm Editorial Dark Ledger) */
+html.dark .bg-\[\#EAE8E1\] {
+  background-color: #0D120F !important;
+}
+html.dark .bg-\[\#F6F5F0\],
+html.dark .bg-\[\#F6F5F0\]\/95,
+html.dark .bg-\[\#F6F5F0\]\/60 {
+  background-color: #121815 !important;
+}
+html.dark .bg-\[\#FFFFFF\],
+html.dark .bg-\[\#FFFFFF\]\/95,
+html.dark .bg-\[\#FFFFFF\]\/80 {
+  background-color: #1A231E !important;
+}
+html.dark .bg-\[\#F0F1EB\],
+html.dark .bg-\[\#F0F1EB\]\/70 {
+  background-color: #222E28 !important;
+}
+html.dark .bg-\[\#E8DCCB\],
+html.dark .bg-\[\#E8DCCB\]\/70,
+html.dark .bg-\[\#E8DCCB\]\/65 {
+  background-color: #2C3A32 !important;
+}
+html.dark .bg-\[\#E4E6DE\],
+html.dark .bg-\[\#E4E6DE\]\/70 {
+  background-color: #2A3630 !important;
+}
+
+/* Superficies semánticas en modo oscuro */
+html.dark .bg-\[\#EDF7F2\] {
+  background-color: rgba(35, 132, 91, 0.18) !important;
+}
+html.dark .bg-\[\#FDF2F2\],
+html.dark .bg-\[\#FDF5F2\] {
+  background-color: rgba(201, 76, 76, 0.18) !important;
+}
+html.dark .bg-\[\#FEF6E7\],
+html.dark .bg-\[\#FEF9EE\] {
+  background-color: rgba(217, 154, 50, 0.18) !important;
+}
+html.dark .bg-\[\#F0F5FA\],
+html.dark .bg-\[\#F3F7FA\] {
+  background-color: rgba(82, 122, 154, 0.2) !important;
+}
+
+/* Textos en modo oscuro */
+html.dark .text-\[\#26332D\] {
+  color: #F2F0E8 !important;
+}
+html.dark .text-\[\#68736B\] {
+  color: #A3B1A8 !important;
+}
+html.dark .text-\[\#34483D\] {
+  color: #8FC0A9 !important;
+}
+html.dark .text-\[\#23845B\] {
+  color: #4CD49A !important;
+}
+html.dark .text-\[\#C94C4C\] {
+  color: #F27474 !important;
+}
+html.dark .text-\[\#9A6712\] {
+  color: #F4BA58 !important;
+}
+html.dark .text-\[\#A65332\] {
+  color: #F09C79 !important;
+}
+html.dark .text-\[\#4D6A80\],
+html.dark .text-\[\#527A9A\] {
+  color: #8BB8DC !important;
+}
+
+/* Bordes en modo oscuro */
+html.dark .border-\[\#E4E6DE\],
+html.dark .divide-\[\#E4E6DE\] > :not([hidden]) ~ :not([hidden]) {
+  border-color: #2D3B34 !important;
+}
+html.dark .border-\[\#F1D8CE\],
+html.dark .border-\[\#F5CACA\] {
+  border-color: rgba(201, 76, 76, 0.38) !important;
+}
+html.dark .border-\[\#C6E7D6\] {
+  border-color: rgba(35, 132, 91, 0.38) !important;
+}
+html.dark .border-\[\#F5DFA8\],
+html.dark .border-\[\#F5E1B9\] {
+  border-color: rgba(217, 154, 50, 0.38) !important;
+}
+html.dark .border-\[\#CFE0EE\],
+html.dark .border-\[\#D5E1EB\] {
+  border-color: rgba(82, 122, 154, 0.38) !important;
+}
+html.dark .border-\[\#F6F5F0\] {
+  border-color: #121815 !important;
 }
