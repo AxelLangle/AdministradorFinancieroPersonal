@@ -347,6 +347,7 @@ export function FinanceStoreProvider({
 
   const [activeScreen, setActiveScreenState] = useState<ScreenId>("P01");
   const [previousScreen, setPreviousScreen] = useState<ScreenId>("P01");
+  const [screenHistory, setScreenHistory] = useState<ScreenId[]>([]);
 
   const [theme, setThemeState] = useState<ThemeMode>("light");
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
@@ -778,7 +779,15 @@ export function FinanceStoreProvider({
 
   const setActiveScreen = useCallback(
     (next: ScreenId) => {
+      if (next === activeScreen) return;
       setPreviousScreen(activeScreen);
+      setScreenHistory((prev) => {
+        const MAIN_TABS: ScreenId[] = ["P10", "P18", "P20", "P28"];
+        if (MAIN_TABS.includes(next)) {
+          return [...prev.filter((s) => !["P11", "P14", "P15", "P16", "P17", "P19", "P21"].includes(s)).slice(-12), activeScreen];
+        }
+        return [...prev.slice(-14), activeScreen];
+      });
       setActiveScreenState(next);
       if (typeof window !== "undefined") {
         window.scrollTo({ top: 0, behavior: "smooth" });
@@ -788,8 +797,29 @@ export function FinanceStoreProvider({
   );
 
   const goBack = useCallback(() => {
-    setActiveScreenState(previousScreen || "P10");
-  }, [previousScreen]);
+    const stack = [...screenHistory];
+    let target: ScreenId | undefined = stack.pop();
+
+    const TX_SCREENS: ScreenId[] = ["P14", "P15", "P16", "P17"];
+    while (
+      target &&
+      TX_SCREENS.includes(target) &&
+      (!selectedTransactionId ||
+        !transactions.some((t) => t.id === selectedTransactionId))
+    ) {
+      target = stack.pop();
+    }
+
+    const fallback: ScreenId =
+      target || (TX_SCREENS.includes(previousScreen) ? "P10" : previousScreen || "P10");
+
+    setScreenHistory(stack);
+    setPreviousScreen(stack[stack.length - 1] || "P10");
+    setActiveScreenState(fallback);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [screenHistory, previousScreen, selectedTransactionId, transactions]);
 
   const goToPreviousMonth = useCallback(() => {
     setCurrentYearMonth((prev) => getPreviousYearMonth(prev));
@@ -992,9 +1022,14 @@ export function FinanceStoreProvider({
       >
     ): Promise<Transaction> => {
       const nowIso = new Date().toISOString();
-      const tempId = crypto.randomUUID
-        ? crypto.randomUUID()
-        : `tx-${Date.now()}`;
+      const tempId =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+              const r = (Math.random() * 16) | 0;
+              const v = c === "x" ? r : (r & 0x3) | 0x8;
+              return v.toString(16);
+            });
 
       const optimisticTx: Transaction = {
         ...txData,
@@ -1011,6 +1046,7 @@ export function FinanceStoreProvider({
         const { data } = await supabase
           .from("transactions")
           .insert({
+            id: tempId,
             workspace_id: workspaceId,
             account_id: account.id,
             type: txData.type,
@@ -1145,16 +1181,42 @@ export function FinanceStoreProvider({
     ]
   );
 
-  // Eliminar movimiento
+  // Eliminar movimiento permanentemente y actualizar movimientos/presupuesto
   const deleteTransaction = useCallback(
     async (id: string) => {
+      const existing = transactions.find((t) => t.id === id);
       setTransactions((prev) => prev.filter((t) => t.id !== id));
+      setNotifications((prev) =>
+        prev.filter((n) => n.related_transaction_id !== id)
+      );
+      setSelectedTransactionId((prev) => (prev === id ? null : prev));
+
       if (user.isAuthenticated && workspaceId) {
-        await supabase.from("transactions").delete().eq("id", id);
+        const { error } = await supabase
+          .from("transactions")
+          .delete()
+          .eq("id", id)
+          .eq("workspace_id", workspaceId);
+        if (error) {
+          console.error("Error eliminando movimiento:", error);
+          if (existing) {
+            setTransactions((prev) =>
+              prev.some((t) => t.id === id) ? prev : [...prev, existing]
+            );
+          }
+          showToast("No se pudo eliminar el movimiento. Intenta de nuevo.");
+          return;
+        }
       }
-      showToast("Movimiento eliminado");
+
+      const kindLabel = existing?.type === "income" ? "Ingreso" : "Gasto";
+      showToast(
+        existing
+          ? `${kindLabel} "${existing.title}" eliminado`
+          : "Movimiento eliminado"
+      );
     },
-    [user.isAuthenticated, workspaceId, showToast]
+    [transactions, user.isAuthenticated, workspaceId, showToast]
   );
 
   // Confirmar pago de gasto
@@ -1299,23 +1361,32 @@ export function FinanceStoreProvider({
     async (transactionId: string) => {
       const existing = transactions.find((t) => t.id === transactionId);
       if (!existing) return;
-      const nowIso = new Date().toISOString();
-      setTransactions((prev) =>
-        prev.map((t) =>
-          t.id === transactionId
-            ? { ...t, status: "cancelled", updated_at: nowIso }
-            : t
-        )
+
+      setTransactions((prev) => prev.filter((t) => t.id !== transactionId));
+      setNotifications((prev) =>
+        prev.filter((n) => n.related_transaction_id !== transactionId)
+      );
+      setSelectedTransactionId((prev) =>
+        prev === transactionId ? null : prev
       );
 
       if (user.isAuthenticated && workspaceId) {
-        await supabase
+        const { error } = await supabase
           .from("transactions")
-          .update({ status: "cancelled" })
-          .eq("id", transactionId);
+          .delete()
+          .eq("id", transactionId)
+          .eq("workspace_id", workspaceId);
+        if (error) {
+          console.error("Error cancelando compromiso:", error);
+          setTransactions((prev) =>
+            prev.some((t) => t.id === transactionId) ? prev : [...prev, existing]
+          );
+          showToast("No se pudo cancelar el compromiso. Intenta de nuevo.");
+          return;
+        }
       }
 
-      showToast(`"${existing.title}" marcado como cancelado`);
+      showToast(`Compromiso "${existing.title}" cancelado y eliminado`);
     },
     [transactions, user.isAuthenticated, workspaceId, showToast]
   );
