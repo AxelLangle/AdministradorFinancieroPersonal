@@ -19,6 +19,7 @@ import type {
   NextIncomeStretch,
   PriorityLevel,
   RecurrenceEditScope,
+  RecurrenceFrequency,
   RecurrenceRule,
   ScreenId,
   ThemeMode,
@@ -30,6 +31,7 @@ import {
   calculateBudgetSummary,
   calculateMonthProjection,
   calculateNextIncomeStretch,
+  generateOccurrencesForRuleInMonth,
   getDaysInMonth,
   getNextYearMonth,
   getPreviousYearMonth,
@@ -163,14 +165,24 @@ export interface OnboardingDraft {
     id: string;
     title: string;
     amount: number;
-    frequency: "semimonthly" | "monthly" | "one_off";
+    amountType?: "fixed" | "variable";
+    frequency: RecurrenceFrequency | "one_off";
     dayOfMonth: number;
+    semimonthlyDays?: string | null;
+    dayOfWeek?: number | null;
+    startDate?: string;
+    scheduleSummary?: string;
   }[];
   fixedExpenses: {
     id: string;
     title: string;
     amount: number;
     dayOfMonth: number;
+    frequency?: RecurrenceFrequency;
+    semimonthlyDays?: string | null;
+    dayOfWeek?: number | null;
+    startDate?: string;
+    scheduleSummary?: string;
     priority: PriorityLevel;
     amountType: "fixed" | "variable";
     categoryId: string;
@@ -1538,37 +1550,21 @@ export function FinanceStoreProvider({
         }
       }
 
-      // Generar ocurrencia automática en el mes actual si está activa
+      // Generar todas las ocurrencias correspondientes en el mes actual si está activa
       if (newRule.status === "active") {
-        const [y, m] = currentYearMonth.split("-").map(Number);
-        const maxDay = getDaysInMonth(y, m);
-        const clampedDay = String(
-          Math.min(newRule.day_of_month || 15, maxDay)
-        ).padStart(2, "0");
-        const expDate = `${currentYearMonth}-${clampedDay}`;
-
-        await createTransaction({
-          type: newRule.type,
-          title: newRule.title,
-          category_id: newRule.category_id,
-          priority: newRule.priority,
-          status:
-            newRule.type === "income"
-              ? "scheduled"
-              : expDate < referenceDate
-              ? "overdue"
-              : "pending",
-          amount_type: newRule.amount_type,
-          estimated_amount: newRule.default_amount,
-          actual_amount: null,
-          expected_date: expDate,
-          settled_date: null,
-          settled_at: null,
-          recurrence_rule_id: finalRuleId,
-          occurrence_date: expDate,
-          is_exception: false,
-          notes: newRule.notes,
+        const persistedRule: RecurrenceRule = {
+          ...newRule,
+          id: finalRuleId,
+        };
+        const occurrences = generateOccurrencesForRuleInMonth({
+          rule: persistedRule,
+          yearMonth: currentYearMonth,
+          referenceDate,
         });
+
+        for (const occ of occurrences) {
+          await createTransaction(occ);
+        }
       }
 
       showToast(`Regla recurrente "${newRule.title}" creada`);
@@ -1620,6 +1616,9 @@ export function FinanceStoreProvider({
             amount_type: updates.amount_type,
             frequency: updates.frequency,
             day_of_month: updates.day_of_month,
+            semimonthly_days: updates.semimonthly_days,
+            day_of_week: updates.day_of_week,
+            start_date: updates.start_date,
             priority: updates.priority,
             category_id: updates.category_id,
             notes: updates.notes,
@@ -1793,46 +1792,52 @@ export function FinanceStoreProvider({
 
     for (const inc of onboardingDraft.incomes) {
       if (inc.amount > 0) {
-        await createRecurrenceRule({
-          type: "income",
-          title: inc.title,
-          category_id: incomeCatId,
-          priority: "essential",
-          amount_type: "fixed",
-          default_amount: inc.amount,
-          frequency:
-            inc.frequency === "semimonthly" ? "semimonthly" : "monthly",
-          interval_count: 1,
-          day_of_month: inc.dayOfMonth || 15,
-          semimonthly_days: inc.frequency === "semimonthly" ? "15,last" : null,
-          day_of_week: null,
-          start_date: `${currentYearMonth}-01`,
-          end_date: null,
-          status: "active",
-          notes: "Configurado durante tu bienvenida",
-        });
-
-        // Si es quincenal, crear también la ocurrencia de fin de mes
-        if (inc.frequency === "semimonthly") {
+        if (inc.frequency === "one_off") {
           const [y, m] = currentYearMonth.split("-").map(Number);
-          const endDay = String(getDaysInMonth(y, m)).padStart(2, "0");
-          const endDate = `${currentYearMonth}-${endDay}`;
+          const maxDay = getDaysInMonth(y, m);
+          const dStr = String(
+            Math.min(Math.max(1, inc.dayOfMonth || 15), maxDay)
+          ).padStart(2, "0");
+          const expDate = inc.startDate || `${currentYearMonth}-${dStr}`;
           await createTransaction({
             type: "income",
-            title: `${inc.title} (2ª quincena)`,
+            title: inc.title,
             category_id: incomeCatId,
             priority: "essential",
             status: "scheduled",
-            amount_type: "fixed",
+            amount_type: inc.amountType || "fixed",
             estimated_amount: inc.amount,
             actual_amount: null,
-            expected_date: endDate,
+            expected_date: expDate,
             settled_date: null,
             settled_at: null,
             recurrence_rule_id: null,
             occurrence_date: null,
             is_exception: false,
-            notes: "Segunda quincena del mes",
+            notes: "Configurado durante tu bienvenida",
+          });
+        } else {
+          await createRecurrenceRule({
+            type: "income",
+            title: inc.title,
+            category_id: incomeCatId,
+            priority: "essential",
+            amount_type: inc.amountType || "fixed",
+            default_amount: inc.amount,
+            frequency: inc.frequency,
+            interval_count: 1,
+            day_of_month: inc.dayOfMonth || 15,
+            semimonthly_days:
+              inc.semimonthlyDays !== undefined
+                ? inc.semimonthlyDays
+                : inc.frequency === "semimonthly"
+                ? "15,last"
+                : null,
+            day_of_week: inc.dayOfWeek ?? null,
+            start_date: inc.startDate || `${currentYearMonth}-01`,
+            end_date: null,
+            status: "active",
+            notes: inc.scheduleSummary || "Configurado durante tu bienvenida",
           });
         }
       }
@@ -1848,15 +1853,15 @@ export function FinanceStoreProvider({
           priority: exp.priority,
           amount_type: exp.amountType,
           default_amount: exp.amount,
-          frequency: "monthly",
+          frequency: exp.frequency || "monthly",
           interval_count: 1,
           day_of_month: exp.dayOfMonth || 1,
-          semimonthly_days: null,
-          day_of_week: null,
-          start_date: `${currentYearMonth}-01`,
+          semimonthly_days: exp.semimonthlyDays ?? null,
+          day_of_week: exp.dayOfWeek ?? null,
+          start_date: exp.startDate || `${currentYearMonth}-01`,
           end_date: null,
           status: "active",
-          notes: "Compromiso mensual recurrente",
+          notes: exp.scheduleSummary || "Compromiso recurrente",
         });
       }
     }
