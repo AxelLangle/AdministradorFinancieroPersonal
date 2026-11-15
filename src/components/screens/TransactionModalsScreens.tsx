@@ -3,12 +3,14 @@
 import React, { useEffect, useState } from "react";
 import { useFinanceStore } from "@/lib/store/finance-store";
 import {
+  affectsCurrentBalance,
   formatDateDDMMYYYY,
   formatMXN,
   getEffectiveAmount,
   isDateBeforeOpeningBalance,
   isExpenseOverdue,
   isIncomeDelayed,
+  isPriorToTodayOrCutoff,
   roundCurrency,
 } from "@/lib/finance/engine";
 import {
@@ -17,11 +19,16 @@ import {
   StatusBadge,
 } from "@/components/ui/PriorityBadge";
 import { CurrencyInput } from "@/components/ui/CurrencyInput";
+import {
+  RecurrenceScheduleBuilder,
+  buildRuleScheduleFields,
+  createDefaultScheduleConfig,
+  type RecurrenceScheduleConfig,
+} from "@/components/ui/RecurrenceScheduleBuilder";
 import type {
   AmountType,
   PriorityLevel,
   RecurrenceEditScope,
-  RecurrenceFrequency,
 } from "@/lib/finance/types";
 import {
   AlertTriangle,
@@ -86,6 +93,7 @@ export function TransactionModalsScreens() {
     setSelectedDate,
     selectedTransactionId,
     setSelectedTransactionId,
+    setSelectedRuleId,
     account,
     categories,
     transactions,
@@ -115,10 +123,13 @@ export function TransactionModalsScreens() {
   const [priority, setPriority] = useState<PriorityLevel>("essential");
   const [amountType, setAmountType] = useState<AmountType>("fixed");
   const [isRecurring, setIsRecurring] = useState(false);
-  const [recurringFrequency, setRecurringFrequency] =
-    useState<RecurrenceFrequency>("monthly");
+  const [recurrenceConfig, setRecurrenceConfig] =
+    useState<RecurrenceScheduleConfig>(() =>
+      createDefaultScheduleConfig(referenceDate, "monthly", referenceDate)
+    );
   const [notes, setNotes] = useState("");
   const [showStatusGuide, setShowStatusGuide] = useState(false);
+  const [manualSkipBalance, setManualSkipBalance] = useState(false);
 
   const availableCats = categories.filter(
     (c) =>
@@ -133,7 +144,12 @@ export function TransactionModalsScreens() {
       activeScreen === "P13" ||
       activeScreen === "P13B"
     ) {
-      setDateVal(selectedDate || referenceDate);
+      const targetDate = selectedDate || referenceDate;
+      setDateVal(targetDate);
+      setIsRecurring(false);
+      setRecurrenceConfig(
+        createDefaultScheduleConfig(referenceDate, "monthly", targetDate)
+      );
       const firstMatchingCat = categories.find(
         (c) =>
           c.is_active &&
@@ -164,6 +180,14 @@ export function TransactionModalsScreens() {
     useState<RecurrenceEditScope>("future");
   const [scopeAmountNum, setScopeAmountNum] = useState(0);
   const [scopeTitleStr, setScopeTitleStr] = useState("");
+  const [scopeAmountType, setScopeAmountType] = useState<AmountType>("fixed");
+  const [scopeIsUnquantified, setScopeIsUnquantified] = useState(false);
+  const [scopeExpectedDate, setScopeExpectedDate] = useState(referenceDate);
+  const [scopeSettledDate, setScopeSettledDate] = useState(referenceDate);
+  const [scopeCategoryId, setScopeCategoryId] = useState("");
+  const [scopePriority, setScopePriority] =
+    useState<PriorityLevel>("essential");
+  const [scopeNotes, setScopeNotes] = useState("");
 
   useEffect(() => {
     if (activeScreen === "P14" && selectedTx) {
@@ -172,22 +196,52 @@ export function TransactionModalsScreens() {
       setConfirmAmountNum(
         selectedTx.actual_amount ?? selectedTx.estimated_amount ?? 0
       );
-      setConfirmDateStr(referenceDate);
+      const expDate = selectedTx.expected_date.slice(0, 10);
+      setConfirmDateStr(expDate < referenceDate ? expDate : referenceDate);
       setConfirmNotes(selectedTx.notes || "");
+      setManualSkipBalance(false);
     } else if (activeScreen === "P16" && selectedTx) {
       setConfirmAmountNum(
         selectedTx.actual_amount ?? selectedTx.estimated_amount ?? 0
       );
-      setConfirmDateStr(referenceDate);
+      const expDate = selectedTx.expected_date.slice(0, 10);
+      setConfirmDateStr(expDate < referenceDate ? expDate : referenceDate);
       setConfirmNotes(selectedTx.notes || "");
+      setManualSkipBalance(false);
     } else if (activeScreen === "P17" && selectedTx) {
       setScopeTitleStr(selectedTx.title);
       setScopeAmountNum(
         selectedTx.actual_amount ?? selectedTx.estimated_amount ?? 0
       );
+      setScopeAmountType(selectedTx.amount_type);
+      setScopeIsUnquantified(
+        selectedTx.amount_type === "variable" &&
+          selectedTx.estimated_amount === null &&
+          selectedTx.status !== "paid" &&
+          selectedTx.status !== "received"
+      );
+      setScopeExpectedDate(selectedTx.expected_date.slice(0, 10));
+      setScopeSettledDate(
+        (
+          selectedTx.settled_date ||
+          selectedTx.expected_date ||
+          referenceDate
+        ).slice(0, 10)
+      );
+      setScopeCategoryId(
+        selectedTx.category_id ||
+          categories.find(
+            (c) =>
+              c.is_active &&
+              (c.kind === selectedTx.type || c.kind === "both")
+          )?.id ||
+          ""
+      );
+      setScopePriority(selectedTx.priority);
+      setScopeNotes(selectedTx.notes || "");
       setScopeChoice(selectedTx.recurrence_rule_id ? "future" : "single");
     }
-  }, [activeScreen, selectedTx, referenceDate]);
+  }, [activeScreen, selectedTx, referenceDate, categories]);
 
   // === Formulario Dinámico de Nuevo Gasto / Nuevo Ingreso ===
   if (
@@ -198,6 +252,9 @@ export function TransactionModalsScreens() {
   ) {
     const isPriorToCutoff =
       isSettledMode && isDateBeforeOpeningBalance(dateVal, account);
+    const isPriorToToday = isSettledMode && dateVal < referenceDate;
+    const skipsBalanceOnCreate =
+      isSettledMode && isPriorToTodayOrCutoff(dateVal, account, referenceDate);
     const isFutureSettled = isSettledMode && dateVal > referenceDate;
     const isPastScheduledIncome =
       !isSettledMode && isIncomeScreen && dateVal < referenceDate;
@@ -217,9 +274,12 @@ export function TransactionModalsScreens() {
         ? "overdue"
         : "pending";
 
-      const dayOfMonth = Number(dateVal.split("-")[2]) || 1;
-
       if (isRecurring) {
+        const scheduleFields = buildRuleScheduleFields(
+          recurrenceConfig,
+          amountNum > 0 ? amountNum : 0,
+          referenceDate
+        );
         await createRecurrenceRule({
           type: isIncomeScreen ? "income" : "expense",
           title:
@@ -229,20 +289,15 @@ export function TransactionModalsScreens() {
           priority,
           amount_type: amountType,
           default_amount: amountNum > 0 ? amountNum : null,
-          frequency: recurringFrequency,
+          frequency: scheduleFields.frequency,
           interval_count: 1,
-          day_of_month: dayOfMonth,
-          semimonthly_days:
-            recurringFrequency === "semimonthly" ? "15,last" : null,
-          day_of_week: null,
-          start_date: dateVal,
+          day_of_month: scheduleFields.dayOfMonth,
+          semimonthly_days: scheduleFields.semimonthlyDays,
+          day_of_week: scheduleFields.dayOfWeek,
+          start_date: scheduleFields.startDate,
           end_date: null,
           status: "active",
-          notes:
-            notes.trim() ||
-            `Frecuencia ${
-              recurringFrequency === "monthly" ? "mensual" : "quincenal"
-            }`,
+          notes: notes.trim() || null,
         });
       } else {
         const created = await createTransaction({
@@ -260,8 +315,8 @@ export function TransactionModalsScreens() {
           expected_date: dateVal,
           settled_date: isSettledMode ? dateVal : null,
           settled_at: isSettledMode
-            ? isPriorToCutoff
-              ? `${dateVal}T12:00:00.000Z`
+            ? skipsBalanceOnCreate
+              ? null
               : new Date().toISOString()
             : null,
           recurrence_rule_id: null,
@@ -583,21 +638,25 @@ export function TransactionModalsScreens() {
             </div>
           )}
 
-          {/* Banner informativo azul cuando la fecha real es anterior a opening_balance_date */}
-          {isPriorToCutoff && (
+          {/* Banner informativo azul cuando la fecha real es anterior a hoy o al corte inicial */}
+          {(isPriorToCutoff || isPriorToToday) && (
             <div className="p-3.5 rounded-2xl bg-[#F0F5FA] border border-[#CFE0EE] flex items-start gap-2.5">
               <Info className="w-4 h-4 text-[#527A9A] shrink-0 mt-0.5" />
               <div className="text-xs text-[#26332D] leading-relaxed">
                 <strong className="text-[#527A9A] block mb-0.5">
-                  Movimiento anterior a tu fecha de corte (
-                  {formatDateDDMMYYYY(account.opening_balance_date)})
+                  {isPriorToCutoff
+                    ? `Movimiento anterior a tu fecha de corte (${formatDateDDMMYYYY(
+                        account.opening_balance_date
+                      )})`
+                    : `Fecha anterior a hoy (${formatDateDDMMYYYY(referenceDate)})`}
                 </strong>
                 Este {isIncomeScreen ? "ingreso recibido" : "gasto pagado"} el{" "}
-                <strong>{formatDateDDMMYYYY(dateVal)}</strong> se sumará a tus estadísticas del mes y a tu presupuesto mensual, pero{" "}
+                <strong>{formatDateDDMMYYYY(dateVal)}</strong> quedará registrado en tu historial y estadísticas, pero{" "}
                 <strong>
-                  no modificará tu saldo actual ({formatMXN(account.opening_balance)})
+                  no modificará tu saldo líquido actual (
+                  {formatMXN(monthProjection.currentBalance)})
                 </strong>{" "}
-                porque ya estaba contemplado cuando definiste tu saldo inicial.
+                porque ese dinero ya formaba parte de tus movimientos previos y tu saldo de hoy ya es su consecuencia.
               </div>
             </div>
           )}
@@ -661,7 +720,7 @@ export function TransactionModalsScreens() {
             )}
 
             <div className="pt-2 border-t border-[#E4E6DE] space-y-2.5">
-              <div className="flex items-center justify-between">
+              <label className="flex items-center justify-between cursor-pointer">
                 <div className="flex items-center gap-2 text-xs font-semibold text-[#26332D]">
                   <Repeat className="w-4 h-4 text-[#34483D]" />
                   <span>¿Se repite periódicamente?</span>
@@ -669,36 +728,33 @@ export function TransactionModalsScreens() {
                 <input
                   type="checkbox"
                   checked={isRecurring}
-                  onChange={(e) => setIsRecurring(e.target.checked)}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setIsRecurring(checked);
+                    if (checked) {
+                      setRecurrenceConfig(
+                        createDefaultScheduleConfig(
+                          referenceDate,
+                          "monthly",
+                          dateVal
+                        )
+                      );
+                    }
+                  }}
                   className="w-4 h-4 accent-[#34483D]"
                 />
-              </div>
+              </label>
 
               {isRecurring && (
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setRecurringFrequency("monthly")}
-                    className={`py-2 rounded-xl text-xs font-semibold border cursor-pointer ${
-                      recurringFrequency === "monthly"
-                        ? "bg-[#34483D] text-white border-[#34483D]"
-                        : "bg-[#F0F1EB] text-[#26332D] border-[#E4E6DE]"
-                    }`}
-                  >
-                    Mensual
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRecurringFrequency("biweekly")}
-                    className={`py-2 rounded-xl text-xs font-semibold border cursor-pointer ${
-                      recurringFrequency === "biweekly"
-                        ? "bg-[#34483D] text-white border-[#34483D]"
-                        : "bg-[#F0F1EB] text-[#26332D] border-[#E4E6DE]"
-                    }`}
-                  >
-                    Quincenal
-                  </button>
-                </div>
+                <RecurrenceScheduleBuilder
+                  transactionType={isIncomeScreen ? "income" : "expense"}
+                  referenceDate={referenceDate}
+                  value={recurrenceConfig}
+                  onChange={setRecurrenceConfig}
+                  baseAmount={amountNum}
+                  allowExtendedFrequencies={true}
+                  allowDifferentAmounts={true}
+                />
               )}
             </div>
 
@@ -983,33 +1039,92 @@ export function TransactionModalsScreens() {
           </div>
         )}
 
+        {/* Aviso si se descontó/sumó por error un movimiento anterior a hoy o al corte */}
+        {(isDateBeforeOpeningBalance(tx.expected_date, account) ||
+          tx.expected_date.slice(0, 10) < referenceDate) &&
+          (tx.status === "paid" || tx.status === "received") &&
+          affectsCurrentBalance(tx, account) && (
+            <div className="p-4 rounded-2xl bg-[#FEF6E7] border border-[#F5DFA8] space-y-2.5 text-xs text-[#26332D]">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-[#D99A32] shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <strong className="text-[#9A6712] block mb-0.5">
+                    ¿Este {tx.type === "expense" ? "pago" : "cobro"} anterior a hoy ya estaba contemplado en tu saldo actual?
+                  </strong>
+                  Su fecha programada era el{" "}
+                  <strong>{formatDateDDMMYYYY(tx.expected_date)}</strong> (anterior a{" "}
+                  {isDateBeforeOpeningBalance(tx.expected_date, account)
+                    ? `tu corte del ${formatDateDDMMYYYY(account.opening_balance_date)}`
+                    : `hoy (${formatDateDDMMYYYY(referenceDate)})`}
+                  ), pero afectó tu dinero líquido actual al confirmarse.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  const realAmt = getEffectiveAmount(tx);
+                  const origDate = tx.expected_date.slice(0, 10);
+                  if (tx.type === "expense") {
+                    await confirmExpensePayment({
+                      transactionId: tx.id,
+                      actualAmount: realAmt,
+                      settledDate: origDate,
+                      notes: tx.notes || undefined,
+                      skipBalanceAdjustment: true,
+                    });
+                  } else {
+                    await confirmIncomeReceipt({
+                      transactionId: tx.id,
+                      actualAmount: realAmt,
+                      settledDate: origDate,
+                      notes: tx.notes || undefined,
+                      skipBalanceAdjustment: true,
+                    });
+                  }
+                }}
+                className="w-full py-2.5 px-3 rounded-xl bg-[#34483D] hover:bg-[#26332D] text-white font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>
+                  Ajustar fecha al {formatDateDDMMYYYY(tx.expected_date)} y{" "}
+                  {tx.type === "expense" ? "devolver" : "ajustar"}{" "}
+                  {formatMXN(getEffectiveAmount(tx))} en mi saldo actual
+                </span>
+              </button>
+            </div>
+          )}
+
         {/* Acciones principales del movimiento */}
         <div className="space-y-2 pt-1">
-          {tx.type === "expense" &&
-            tx.status !== "paid" &&
-            tx.status !== "cancelled" && (
-              <button
-                type="button"
-                onClick={() => setActiveScreen("P15")}
-                className="w-full py-3.5 px-4 rounded-xl bg-[#34483D] hover:bg-[#26332D] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Confirmar pago</span>
-              </button>
-            )}
+          {tx.type === "expense" && tx.status !== "cancelled" && (
+            <button
+              type="button"
+              onClick={() => setActiveScreen("P15")}
+              className="w-full py-3.5 px-4 rounded-xl bg-[#34483D] hover:bg-[#26332D] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>
+                {tx.status === "paid"
+                  ? "Cambiar fecha o monto de pago"
+                  : "Confirmar pago"}
+              </span>
+            </button>
+          )}
 
-          {tx.type === "income" &&
-            tx.status !== "received" &&
-            tx.status !== "cancelled" && (
-              <button
-                type="button"
-                onClick={() => setActiveScreen("P16")}
-                className="w-full py-3.5 px-4 rounded-xl bg-[#23845B] hover:bg-[#1D6E4B] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Confirmar recepción de ingreso</span>
-              </button>
-            )}
+          {tx.type === "income" && tx.status !== "cancelled" && (
+            <button
+              type="button"
+              onClick={() => setActiveScreen("P16")}
+              className="w-full py-3.5 px-4 rounded-xl bg-[#23845B] hover:bg-[#1D6E4B] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>
+                {tx.status === "received"
+                  ? "Cambiar fecha o monto de recepción"
+                  : "Confirmar recepción de ingreso"}
+              </span>
+            </button>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -1055,16 +1170,33 @@ export function TransactionModalsScreens() {
     const estAmount = target.estimated_amount ?? 0;
     const realAmount = confirmAmountNum;
     const diff = roundCurrency(realAmount - estAmount);
+    const isPriorToCutoff = isDateBeforeOpeningBalance(confirmDateStr, account);
+    const isPriorToToday = confirmDateStr < referenceDate;
+    const skipsBalanceAdjustment =
+      isPriorToCutoff || isPriorToToday || manualSkipBalance;
+    const alreadyAffectsBalance = affectsCurrentBalance(target, account);
+    const prevActual = target.actual_amount ?? 0;
+    const baseCurrentBalance = alreadyAffectsBalance
+      ? roundCurrency(monthProjection.currentBalance + prevActual)
+      : monthProjection.currentBalance;
 
-    const newCurrentBalance = roundCurrency(
-      monthProjection.currentBalance - realAmount
-    );
-    const newProjectedBalance = roundCurrency(
-      (monthProjection.projectedClosingBalance ?? 0) - diff
-    );
-    const newAvailableBudget = roundCurrency(
-      budgetSummary.availableBudget - diff
-    );
+    const newCurrentBalance = skipsBalanceAdjustment
+      ? baseCurrentBalance
+      : roundCurrency(baseCurrentBalance - realAmount);
+    const newProjectedBalance =
+      target.status === "paid"
+        ? roundCurrency(
+            (monthProjection.projectedClosingBalance ?? 0) +
+              (alreadyAffectsBalance ? prevActual : 0) -
+              (skipsBalanceAdjustment ? 0 : realAmount)
+          )
+        : skipsBalanceAdjustment
+        ? roundCurrency((monthProjection.projectedClosingBalance ?? 0) + estAmount)
+        : roundCurrency((monthProjection.projectedClosingBalance ?? 0) - diff);
+    const newAvailableBudget =
+      target.status === "paid"
+        ? roundCurrency(budgetSummary.availableBudget + prevActual - realAmount)
+        : roundCurrency(budgetSummary.availableBudget - diff);
 
     const handleConfirmExpense = (e: React.FormEvent) => {
       e.preventDefault();
@@ -1073,6 +1205,7 @@ export function TransactionModalsScreens() {
         actualAmount: realAmount,
         settledDate: confirmDateStr,
         notes: confirmNotes,
+        skipBalanceAdjustment: skipsBalanceAdjustment,
       });
       setSelectedDate(confirmDateStr);
       setActiveScreen("P10");
@@ -1154,6 +1287,35 @@ export function TransactionModalsScreens() {
               />
             </div>
 
+            {(isPriorToCutoff || isPriorToToday) ? (
+              <div className="p-3 rounded-xl bg-[#F0F5FA] border border-[#CFE0EE] flex items-start gap-2.5 text-xs text-[#26332D] leading-relaxed">
+                <Info className="w-4 h-4 text-[#527A9A] shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-[#527A9A] block mb-0.5">
+                    {isPriorToCutoff
+                      ? `Pago anterior a tu fecha de corte (${formatDateDDMMYYYY(
+                          account.opening_balance_date
+                        )})`
+                      : `Pago anterior a hoy (${formatDateDDMMYYYY(referenceDate)})`}
+                  </strong>
+                  Como se pagó el <strong>{formatDateDDMMYYYY(confirmDateStr)}</strong>,{" "}
+                  <strong>no descontará tu dinero líquido actual</strong> porque ese gasto ya quedó realizado y tu saldo actual ya es la consecuencia de esos pagos previos.
+                </div>
+              </div>
+            ) : (
+              <label className="flex items-center gap-2 p-3 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs text-[#26332D] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={manualSkipBalance}
+                  onChange={(e) => setManualSkipBalance(e.target.checked)}
+                  className="accent-[#34483D]"
+                />
+                <span>
+                  Ya estaba reflejado en mi saldo actual (solo registrar historial sin descontar dinero líquido)
+                </span>
+              </label>
+            )}
+
             <div>
               <label className="block text-xs font-semibold text-[#68736B] mb-1">
                 Nota o comprobante (opcional)
@@ -1182,6 +1344,7 @@ export function TransactionModalsScreens() {
                   {formatMXN(monthProjection.currentBalance)} →{" "}
                   <span className="text-[#34483D]">
                     {formatMXN(newCurrentBalance)}
+                    {skipsBalanceAdjustment ? " (sin descuento líquido)" : ""}
                   </span>
                 </span>
               </div>
@@ -1230,18 +1393,40 @@ export function TransactionModalsScreens() {
     const estAmount = target.estimated_amount ?? 0;
     const realAmount = confirmAmountNum;
     const wasDelayed = isIncomeDelayed(target, referenceDate);
+    const isPriorToCutoff = isDateBeforeOpeningBalance(confirmDateStr, account);
+    const isPriorToToday = confirmDateStr < referenceDate;
+    const skipsBalanceAdjustment =
+      isPriorToCutoff || isPriorToToday || manualSkipBalance;
+    const alreadyAffectsBalance = affectsCurrentBalance(target, account);
+    const prevActual = target.actual_amount ?? 0;
+    const baseCurrentBalance = alreadyAffectsBalance
+      ? roundCurrency(monthProjection.currentBalance - prevActual)
+      : monthProjection.currentBalance;
 
-    const newCurrentBalance = roundCurrency(
-      monthProjection.currentBalance + realAmount
-    );
-    const newProjectedBalance = wasDelayed
-      ? roundCurrency(
-          (monthProjection.projectedClosingBalance ?? 0) + realAmount
-        )
-      : roundCurrency(
-          (monthProjection.projectedClosingBalance ?? 0) +
-            (realAmount - estAmount)
-        );
+    const newCurrentBalance = skipsBalanceAdjustment
+      ? baseCurrentBalance
+      : roundCurrency(baseCurrentBalance + realAmount);
+    const newProjectedBalance =
+      target.status === "received"
+        ? roundCurrency(
+            (monthProjection.projectedClosingBalance ?? 0) -
+              (alreadyAffectsBalance ? prevActual : 0) +
+              (skipsBalanceAdjustment ? 0 : realAmount)
+          )
+        : skipsBalanceAdjustment
+        ? wasDelayed
+          ? roundCurrency(monthProjection.projectedClosingBalance ?? 0)
+          : roundCurrency(
+              (monthProjection.projectedClosingBalance ?? 0) - estAmount
+            )
+        : wasDelayed
+        ? roundCurrency(
+            (monthProjection.projectedClosingBalance ?? 0) + realAmount
+          )
+        : roundCurrency(
+            (monthProjection.projectedClosingBalance ?? 0) +
+              (realAmount - estAmount)
+          );
 
     const handleConfirmIncome = (e: React.FormEvent) => {
       e.preventDefault();
@@ -1250,6 +1435,7 @@ export function TransactionModalsScreens() {
         actualAmount: realAmount,
         settledDate: confirmDateStr,
         notes: confirmNotes,
+        skipBalanceAdjustment: skipsBalanceAdjustment,
       });
       setSelectedDate(confirmDateStr);
       setActiveScreen("P10");
@@ -1293,13 +1479,13 @@ export function TransactionModalsScreens() {
           </div>
         </div>
 
-        {wasDelayed && (
+        {wasDelayed && !skipsBalanceAdjustment && (
           <div className="p-3.5 rounded-2xl bg-[#EDF7F2] border border-[#C6E7D6] text-xs text-[#26332D] leading-relaxed">
             <strong className="text-[#23845B] block mb-0.5">
               Ingreso atrasado que se incorpora a tu saldo
             </strong>
             Como este ingreso estaba atrasado desde el{" "}
-            {formatDateDDMMYYYY(target.expected_date)}, por seguridad no estaba sumado a tu saldo proyectado. Al confirmarlo hoy, se sumará tanto a tu saldo actual como a tu cierre proyectado del mes.
+            {formatDateDDMMYYYY(target.expected_date)}, por seguridad no estaba sumado a tu saldo proyectado. Al confirmarlo con fecha de hoy, se sumará a tu saldo actual y cierre proyectado del mes.
           </div>
         )}
 
@@ -1332,6 +1518,36 @@ export function TransactionModalsScreens() {
               />
             </div>
 
+            {(isPriorToCutoff || isPriorToToday) ? (
+              <div className="p-3 rounded-xl bg-[#F0F5FA] border border-[#CFE0EE] flex items-start gap-2.5 text-xs text-[#26332D] leading-relaxed">
+                <Info className="w-4 h-4 text-[#527A9A] shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-[#527A9A] block mb-0.5">
+                    {isPriorToCutoff
+                      ? `Cobro anterior a tu fecha de corte (${formatDateDDMMYYYY(
+                          account.opening_balance_date
+                        )})`
+                      : `Cobro anterior a hoy (${formatDateDDMMYYYY(referenceDate)})`}
+                  </strong>
+                  Como recibiste este ingreso el{" "}
+                  <strong>{formatDateDDMMYYYY(confirmDateStr)}</strong>,{" "}
+                  <strong>no se sumará de nuevo a tu saldo líquido actual</strong> porque ya estaba contemplado en el saldo que tienes hoy.
+                </div>
+              </div>
+            ) : (
+              <label className="flex items-center gap-2 p-3 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs text-[#26332D] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={manualSkipBalance}
+                  onChange={(e) => setManualSkipBalance(e.target.checked)}
+                  className="accent-[#34483D]"
+                />
+                <span>
+                  Ya estaba reflejado en mi saldo actual (solo registrar historial sin sumar dinero líquido)
+                </span>
+              </label>
+            )}
+
             <div>
               <label className="block text-xs font-semibold text-[#68736B] mb-1">
                 Nota o referencia (opcional)
@@ -1358,6 +1574,7 @@ export function TransactionModalsScreens() {
                 {formatMXN(monthProjection.currentBalance)} →{" "}
                 <span className="text-[#23845B]">
                   {formatMXN(newCurrentBalance)}
+                  {skipsBalanceAdjustment ? " (sin suma líquida)" : ""}
                 </span>
               </span>
             </div>
@@ -1388,20 +1605,64 @@ export function TransactionModalsScreens() {
 
   // === Editar Movimiento y Alcance de Edición Recurrente ===
   const target = selectedTx;
+  const isSettled = target.status === "paid" || target.status === "received";
+  const p17Categories = categories.filter(
+    (c) => c.is_active && (c.kind === target.type || c.kind === "both")
+  );
+  const canEditSingleDate = !target.recurrence_rule_id || scopeChoice === "single" || isSettled;
 
   const handleApplyScope = (e: React.FormEvent) => {
     e.preventDefault();
+    const effectiveEstimatedAmount =
+      !isSettled && scopeAmountType === "variable" && scopeIsUnquantified
+        ? null
+        : scopeAmountNum;
+
+    const effectiveScope: RecurrenceEditScope =
+      target.recurrence_rule_id && !isSettled ? scopeChoice : "single";
+
+    const nextSettledSkipsBalance = isSettled
+      ? isPriorToTodayOrCutoff(scopeSettledDate, account, referenceDate)
+      : false;
+
+    let nextStatus = target.status;
+    if (!isSettled && canEditSingleDate && target.type === "expense") {
+      if (target.status === "pending" && scopeExpectedDate < referenceDate) {
+        nextStatus = "overdue";
+      } else if (
+        target.status === "overdue" &&
+        scopeExpectedDate >= referenceDate
+      ) {
+        nextStatus = "pending";
+      }
+    }
+
     updateTransaction(
       target.id,
       {
         title: scopeTitleStr.trim() || target.title,
-        estimated_amount: scopeAmountNum,
-        actual_amount:
-          target.status === "paid" || target.status === "received"
-            ? scopeAmountNum
-            : target.actual_amount,
+        amount_type: scopeAmountType,
+        estimated_amount: effectiveEstimatedAmount,
+        actual_amount: isSettled ? scopeAmountNum : target.actual_amount,
+        category_id: scopeCategoryId || null,
+        priority: target.type === "expense" ? scopePriority : target.priority,
+        notes: scopeNotes.trim() || null,
+        ...(canEditSingleDate
+          ? {
+              expected_date: scopeExpectedDate,
+              status: nextStatus,
+            }
+          : {}),
+        ...(isSettled
+          ? {
+              settled_date: scopeSettledDate,
+              settled_at: nextSettledSkipsBalance
+                ? null
+                : target.settled_at || new Date().toISOString(),
+            }
+          : {}),
       },
-      scopeChoice
+      effectiveScope
     );
     setActiveScreen("P14");
   };
@@ -1424,39 +1685,185 @@ export function TransactionModalsScreens() {
         </span>
       </div>
 
-      <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-3">
-        <div className="flex items-center gap-2 text-xs text-[#34483D] font-bold">
-          <Repeat className="w-4 h-4" />
-          <span>Editando: {target.title}</span>
-        </div>
-        <div className="space-y-3">
+      <form onSubmit={handleApplyScope} className="space-y-4 flex-1">
+        <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-3.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs text-[#34483D] font-bold">
+              <Edit3 className="w-4 h-4" />
+              <span>Editando: {target.title}</span>
+            </div>
+            <StatusBadge
+              status={target.status}
+              isOverdueExpense={isExpenseOverdue(target, referenceDate)}
+              isDelayedIncome={isIncomeDelayed(target, referenceDate)}
+              compact
+            />
+          </div>
+
           <div>
             <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
-              Concepto
+              Concepto o título
             </label>
             <input
               type="text"
+              required
               value={scopeTitleStr}
               onChange={(e) => setScopeTitleStr(e.target.value)}
               placeholder="Ej. Netflix estándar"
               className="w-full px-3.5 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-sm font-semibold text-[#26332D]"
             />
           </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
+                Tipo de monto
+              </label>
+              <select
+                value={scopeAmountType}
+                onChange={(e) => {
+                  const nextType = e.target.value as AmountType;
+                  setScopeAmountType(nextType);
+                  if (nextType === "fixed") setScopeIsUnquantified(false);
+                }}
+                className="w-full px-3 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-semibold text-[#26332D]"
+              >
+                <option value="fixed">Fijo ($ exacto)</option>
+                <option value="variable">Variable (~$ estimado)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
+                Categoría
+              </label>
+              <select
+                value={scopeCategoryId}
+                onChange={(e) => setScopeCategoryId(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-semibold text-[#26332D]"
+              >
+                {p17Categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {!isSettled && scopeAmountType === "variable" && (
+            <label className="flex items-center gap-2 p-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs text-[#26332D] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={scopeIsUnquantified}
+                onChange={(e) => setScopeIsUnquantified(e.target.checked)}
+                className="accent-[#34483D]"
+              />
+              <span>Aún no conozco el monto (~$ Por definir)</span>
+            </label>
+          )}
+
+          {!scopeIsUnquantified && (
+            <div>
+              <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
+                {isSettled ? "Monto real (MXN)" : "Monto estimado (MXN)"}
+              </label>
+              <CurrencyInput
+                value={scopeAmountNum}
+                onChange={(_, num) => setScopeAmountNum(num)}
+                prefix={scopeAmountType === "variable" ? "~$" : "$"}
+                placeholder="Ej. 249.00"
+              />
+            </div>
+          )}
+
+          {canEditSingleDate ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
+                  Fecha programada / vencimiento
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={scopeExpectedDate}
+                  onChange={(e) => setScopeExpectedDate(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-semibold text-[#26332D]"
+                />
+              </div>
+
+              {isSettled && (
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
+                    Fecha real de{" "}
+                    {target.type === "income" ? "recepción" : "pago"}
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={scopeSettledDate}
+                    onChange={(e) => setScopeSettledDate(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-semibold text-[#26332D]"
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="p-2.5 rounded-xl bg-[#F0F5FA] border border-[#CFE0EE] text-[11px] text-[#527A9A]">
+              Estás editando en lote varios meses. Si deseas mover un día específico usa{" "}
+              <strong>Solo este movimiento</strong>, o cambia el calendario de toda la regla abajo.
+            </div>
+          )}
+
+          {target.type === "expense" && (
+            <div>
+              <label className="block text-[11px] font-semibold text-[#68736B] mb-1.5">
+                Prioridad
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {(
+                  [
+                    { id: "essential", label: "Esencial" },
+                    { id: "important", label: "Importante" },
+                    { id: "flexible", label: "Flexible" },
+                  ] as const
+                ).map((p) => {
+                  const active = scopePriority === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setScopePriority(p.id)}
+                      className={`py-2 px-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                        active
+                          ? "bg-[#34483D] text-white border-[#34483D]"
+                          : "bg-[#F0F1EB] text-[#26332D] border-[#E4E6DE]"
+                      }`}
+                    >
+                      <PriorityGeometryIcon priority={p.id} size="sm" />
+                      <span>{p.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
-              Monto (MXN)
+              Notas adicionales o referencia
             </label>
-            <CurrencyInput
-              value={scopeAmountNum}
-              onChange={(_, num) => setScopeAmountNum(num)}
-              placeholder="Ej. 249.00"
+            <input
+              type="text"
+              value={scopeNotes}
+              onChange={(e) => setScopeNotes(e.target.value)}
+              placeholder="Ej. Domiciliado a tarjeta, número de contrato..."
+              className="w-full px-3.5 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs text-[#26332D]"
             />
           </div>
         </div>
-      </div>
 
-      <form onSubmit={handleApplyScope} className="space-y-3 flex-1">
-        {target.recurrence_rule_id && (
+        {target.recurrence_rule_id && !isSettled && (
           <>
             <div className="text-xs font-bold text-[#26332D]">
               ¿A qué ocurrencias deseas aplicar este cambio?
@@ -1469,7 +1876,7 @@ export function TransactionModalsScreens() {
                   title: "Solo este movimiento",
                   desc: `Modifica únicamente la ocurrencia del ${formatDateDDMMYYYY(
                     target.expected_date
-                  )} como una excepción puntual. La regla general no cambia.`,
+                  )} (incluyendo su fecha individual) como excepción puntual.`,
                 },
                 {
                   id: "future",
@@ -1514,6 +1921,22 @@ export function TransactionModalsScreens() {
                 </label>
               );
             })}
+
+            <button
+              type="button"
+              onClick={() => {
+                if (target.recurrence_rule_id) {
+                  setSelectedRuleId(target.recurrence_rule_id);
+                  setActiveScreen("P24");
+                }
+              }}
+              className="w-full py-3 px-4 rounded-xl bg-[#FFFFFF] hover:bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-bold text-[#34483D] flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Calendar className="w-4 h-4 text-[#23845B]" />
+              <span>
+                Configurar frecuencia, calendario o días excluidos de la serie
+              </span>
+            </button>
 
             <div className="p-3.5 rounded-2xl bg-[#F0F5FA] border border-[#CFE0EE] flex items-start gap-2.5 text-xs text-[#26332D]">
               <ShieldAlert className="w-4 h-4 text-[#527A9A] shrink-0 mt-0.5" />
