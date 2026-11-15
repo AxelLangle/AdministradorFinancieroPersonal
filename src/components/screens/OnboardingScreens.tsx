@@ -31,8 +31,14 @@ import {
   Calendar as CalendarIcon,
   CheckCircle2,
   Clock,
+  X,
+  Lightbulb,
+  BookOpen,
 } from "lucide-react";
-import { useHorizontalSwipe } from "@/lib/hooks/useSwipeGesture";
+import {
+  useBottomSheetDragToDismiss,
+  useHorizontalSwipe,
+} from "@/lib/hooks/useSwipeGesture";
 
 const ONBOARDING_STEPS: { id: ScreenId; step: number; label: string }[] = [
   { id: "P05", step: 1, label: "Saldo inicial" },
@@ -59,6 +65,179 @@ const WEEKDAYS_OPTIONS = [
   { value: 0, label: "Domingo" },
 ];
 
+interface OnboardingStepHelpItem {
+  field: string;
+  explanation: string;
+  tip?: string;
+}
+
+interface OnboardingStepGuide {
+  stepNumber: number;
+  title: string;
+  summary: string;
+  whyItMatters: string;
+  fields: OnboardingStepHelpItem[];
+  example: string;
+  note: string;
+}
+
+const ONBOARDING_STEP_GUIDES: Partial<Record<ScreenId, OnboardingStepGuide>> = {
+  P05: {
+    stepNumber: 1,
+    title: "¿Cómo funciona el Paso 1: Saldo inicial y corte?",
+    summary:
+      "Aquí defines cuánto dinero real y disponible tienes HOY antes de empezar a registrar movimientos en tu calendario.",
+    whyItMatters:
+      "La aplicación toma esta cantidad como punto de partida para calcular tu Saldo Actual hoy y proyectar con cuánto terminarás el mes.",
+    fields: [
+      {
+        field: "Dinero disponible hoy ($)",
+        explanation:
+          "Suma el dinero que ya tienes en tu cuenta de débito, nómina y efectivo en cartera. Al empezar a escribir un número, el cero inicial desaparece automáticamente.",
+        tip: "No sumes líneas de crédito ni sueldos que aún no te depositan.",
+      },
+      {
+        field: "Fecha de inicio / corte",
+        explanation:
+          "Es el día exacto desde el cual empieza a contar tu saldo actual. Por defecto es hoy.",
+        tip: "Si capturas algún gasto o ingreso pasado anterior a esta fecha, solo quedará como historial informativo y no alterará tu saldo actual para no descontarlo doble.",
+      },
+      {
+        field: "Botones rápidos ($2,500, $5,000, $10,000)",
+        explanation:
+          "Son atajos opcionales por si quieres llenar una cifra base en un toque y ajustarla después.",
+      },
+    ],
+    example:
+      "Si hoy tienes $4,200 en tu tarjeta de débito y $300 en efectivo, escribe $4,500 y deja la fecha de hoy.",
+    note: "Si te equivocas o quieres ajustar tu punto de arranque después, podrás modificarlo desde el menú Más → Saldo y fecha de corte.",
+  },
+  P06: {
+    stepNumber: 2,
+    title: "¿Cómo funciona el Paso 2: Presupuesto mensual?",
+    summary:
+      "Aquí estableces un techo máximo de gasto para el mes completo. Es tu límite saludable para no gastar de más.",
+    whyItMatters:
+      "Mientras avanzan los días, la app compara todo lo que ya pagaste más lo que tienes programado contra este límite y te avisa si te acercas al tope.",
+    fields: [
+      {
+        field: "Techo máximo de gasto del mes ($)",
+        explanation:
+          "Es el monto total que planeas gastar en todo el mes sumando servicios, comida, salidas y compromisos.",
+        tip: "Idealmente debe ser menor a tus ingresos mensuales para que te quede margen de ahorro.",
+      },
+      {
+        field: "Alerta preventiva (80%) y Colchón sugerido (10%)",
+        explanation:
+          "Al llegar al 80% de tu presupuesto verás una advertencia amarilla (Ajustado). El colchón del 10% sirve como reserva de seguridad para imprevistos.",
+      },
+    ],
+    example:
+      "Si ganas $18,000 al mes y quieres ahorrar $3,000, escribe $15,000 como techo mensual.",
+    note: "No pasa nada si lo ajustas después: dentro de la pestaña Presupuesto tienes el botón «Ajustar techo» para cambiarlo en cualquier momento.",
+  },
+  P07: {
+    stepNumber: 3,
+    title: "¿Cómo funciona el Paso 3: Categorías y prioridades?",
+    summary:
+      "Aquí revisas cómo se clasifican tus gastos y qué nivel de importancia tiene cada categoría por defecto.",
+    whyItMatters:
+      "Las prioridades ayudan a identificar rápido qué pagos son intocables y cuáles puedes recortar o posponer si algún mes se vuelve apretado.",
+    fields: [
+      {
+        field: "● Esencial (rojo terracota)",
+        explanation:
+          "Pagos obligatorios que debes cubrir primero: vivienda, luz, agua, despensa básica, salud y tarjetas/créditos.",
+      },
+      {
+        field: "◆ Importante (ámbar)",
+        explanation:
+          "Gastos necesarios para tu rutina o trabajo, con cierto margen de ajuste: transporte, educación, herramientas.",
+      },
+      {
+        field: "○ Flexible (verde oliva/gris)",
+        explanation:
+          "Gustos, salidas, entretenimiento o compras no urgentes. Son los primeros que conviene pausar si tu proyección baja.",
+      },
+      {
+        field: "Selector en cada fila",
+        explanation:
+          "Toca Esencial, Importante o Flexible junto a cualquier categoría para cambiar su prioridad predeterminada desde ahora.",
+      },
+    ],
+    example:
+      "Puedes marcar Vivienda y Servicios como ● Esencial, Transporte como ◆ Importante y Entretenimiento como ○ Flexible.",
+    note: "Más adelante podrás crear categorías nuevas o renombrar las existentes desde Más → Categorías y prioridades.",
+  },
+  P08: {
+    stepNumber: 4,
+    title: "¿Cómo funciona el Paso 4: Ingresos esperados?",
+    summary:
+      "Aquí registras tus entradas de dinero repetitivas (sueldo, quincena, catorcena, rentas o cobros periódicos) para llenar automáticamente tu calendario.",
+    whyItMatters:
+      "Conociendo qué días te pagan y cuánto entra, la app calcula tu cierre de mes y te muestra cuánto dinero te debe rendir «Hasta tu próximo ingreso».",
+    fields: [
+      {
+        field: "Esquema de cobros",
+        explanation:
+          "Elige el que coincide contigo: Quincenal (presets como 15 y fin de mes), Catorcenal cada 14 días exactos (detecta meses con 3 pagos), Calendario libre multi-día (toca varios días del 1 al 31), Semanal o Mensual.",
+      },
+      {
+        field: "¿Recibes un cobro grande y otro pequeño?",
+        explanation:
+          "Si activas «Sí, montos distintos», puedes escribir por separado cuánto entra en tu cobro grande y cuánto en el pequeño (o personalizar el monto de cada día del calendario).",
+        tip: "Útil si recibes bonos o vales solo en una quincena o catorcena.",
+      },
+      {
+        field: "Monto fijo ($) vs Variable (~$)",
+        explanation:
+          "Elige Monto fijo si siempre entra lo mismo; usa Variable (~$) si depende de comisiones, propinas o ventas.",
+      },
+      {
+        field: "Mover fin de semana a viernes",
+        explanation:
+          "Si tu día de pago cae en sábado o domingo y tu empresa adelanta el depósito al viernes, deja marcada esta casilla.",
+      },
+    ],
+    example:
+      "Si recibes catorcena alternada de $9,500 y $8,500 los viernes, elige Catorcenal cada 14 días, activa «Sí, montos distintos» y captura ambos montos.",
+    note: "Si algún día recibes dinero extra ocasional (reembolso o venta), lo agregarás después con el botón + en vez de ponerlo aquí.",
+  },
+  P09: {
+    stepNumber: 5,
+    title: "¿Cómo funciona el Paso 5: Gastos fijos recurrentes?",
+    summary:
+      "Aquí registras únicamente los pagos que se repiten con fecha conocida (como renta, luz, internet o tarjeta) para apartarlos en tu calendario desde el día 1.",
+    whyItMatters:
+      "Te evita la ilusión de tener dinero de más: aunque todavía no venza un recibo, el calendario ya lo considera apartado en tu proyección del mes.",
+    fields: [
+      {
+        field: "¿Qué SÍ va aquí vs qué NO va?",
+        explanation:
+          "SÍ van: renta/hipoteca, luz, agua, gas, internet, celular, colegiaturas, suscripciones y pago de tarjeta/créditos. NO van: súper, gasolina, cafés o antojos (esos van después con +).",
+      },
+      {
+        field: "Frecuencia y día de vencimiento",
+        explanation:
+          "Soporta pagos Mensuales, Bimestrales (como CFE), Quincenales, Catorcenales o Semanales, indicando su día de pago (1–31).",
+      },
+      {
+        field: "Prioridad y Tipo de monto (Fijo vs Variable ~$)",
+        explanation:
+          "Usa Fijo ($) si pagas siempre la misma cantidad (Internet) y Variable (~$) si varía cada recibo (Luz o Tarjeta); cuando pagues el recibo real podrás capturar el monto exacto.",
+      },
+      {
+        field: "Tarjetas de crédito",
+        explanation:
+          "Registra aquí la fecha límite de pago de tu tarjeta con un estimado mensual para no duplicar gastos cuando compres a meses o uses la tarjeta.",
+      },
+    ],
+    example:
+      "Renta de $6,500 Mensual el día 1 (● Esencial, Fijo) y Luz CFE de $600 Bimestral el día 18 (● Esencial, Variable ~$).",
+    note: "Este paso es opcional si prefieres empezar ya; siempre podrás agregar, pausar o editar reglas en Más → Compromisos recurrentes.",
+  },
+};
+
 export function OnboardingScreens() {
   const {
     activeScreen,
@@ -67,9 +246,10 @@ export function OnboardingScreens() {
     setOnboardingDraft,
     categories,
     completeOnboarding,
-    setIsTutorialOpen,
     referenceDate,
   } = useFinanceStore();
+
+  const [isStepHelpOpen, setIsStepHelpOpen] = useState(false);
 
   // Estados de Ingresos (Paso 4 - P08)
   const [newIncomeTitle, setNewIncomeTitle] = useState("");
@@ -114,17 +294,28 @@ export function OnboardingScreens() {
     ONBOARDING_STEPS.findIndex((s) => s.id === activeScreen)
   );
   const currentStepObj = ONBOARDING_STEPS[currentStepIdx] || ONBOARDING_STEPS[0];
+  const currentStepGuide = ONBOARDING_STEP_GUIDES[activeScreen];
+
+  const stepHelpSheetDrag = useBottomSheetDragToDismiss({
+    enabled: isStepHelpOpen,
+    onClose: () => setIsStepHelpOpen(false),
+  });
+
+  const navigateOnboardingStep = (nextScreen: ScreenId) => {
+    setIsStepHelpOpen(false);
+    setActiveScreen(nextScreen);
+  };
 
   const onboardingSwipeHandlers = useHorizontalSwipe({
     threshold: 52,
     onSwipeLeft: () => {
       if (currentStepIdx < ONBOARDING_STEPS.length - 1) {
-        setActiveScreen(ONBOARDING_STEPS[currentStepIdx + 1].id);
+        navigateOnboardingStep(ONBOARDING_STEPS[currentStepIdx + 1].id);
       }
     },
     onSwipeRight: () => {
       if (currentStepIdx > 0) {
-        setActiveScreen(ONBOARDING_STEPS[currentStepIdx - 1].id);
+        navigateOnboardingStep(ONBOARDING_STEPS[currentStepIdx - 1].id);
       }
     },
   });
@@ -150,7 +341,7 @@ export function OnboardingScreens() {
       <div className="flex items-center justify-between mb-2">
         <button
           type="button"
-          onClick={() => setActiveScreen(prevScreen)}
+          onClick={() => navigateOnboardingStep(prevScreen)}
           className="min-h-[44px] px-2 -ml-2 rounded-xl inline-flex items-center gap-1 text-xs font-semibold text-[#68736B] hover:text-[#26332D] cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -161,7 +352,7 @@ export function OnboardingScreens() {
         </span>
         <button
           type="button"
-          onClick={() => setIsTutorialOpen(true)}
+          onClick={() => setIsStepHelpOpen(true)}
           className="min-h-[44px] px-2 -mr-2 rounded-xl inline-flex items-center gap-1 text-xs font-semibold text-[#34483D] hover:underline cursor-pointer"
         >
           <HelpCircle className="w-3.5 h-3.5" />
@@ -174,7 +365,7 @@ export function OnboardingScreens() {
           <button
             key={st.id}
             type="button"
-            onClick={() => setActiveScreen(st.id)}
+            onClick={() => navigateOnboardingStep(st.id)}
             aria-label={`Ir al paso ${st.step}: ${st.label}`}
             className="min-h-[24px] flex items-center cursor-pointer"
           >
@@ -186,6 +377,98 @@ export function OnboardingScreens() {
           </button>
         ))}
       </div>
+
+      {isStepHelpOpen && currentStepGuide && (
+        <div
+          onClick={stepHelpSheetDrag.handleBackdropClick}
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[1px] flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
+          <div
+            {...stepHelpSheetDrag.sheetTouchHandlers}
+            style={stepHelpSheetDrag.sheetStyle}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl sm:rounded-3xl p-5 border border-[#E4E6DE] shadow-2xl max-h-[88dvh] overflow-y-auto space-y-3.5"
+          >
+            <div className="w-12 h-1.5 rounded-full bg-[#E4E6DE] mx-auto sm:hidden" />
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#F0F1EB] text-[10px] font-bold text-[#34483D] border border-[#E4E6DE] mb-1">
+                  <BookOpen className="w-3 h-3" />
+                  <span>Guía del Paso {currentStepGuide.stepNumber} de 5</span>
+                </span>
+                <h3 className="text-base font-bold text-[#26332D] leading-snug">
+                  {currentStepGuide.title}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsStepHelpOpen(false)}
+                aria-label="Cerrar ayuda del paso"
+                className="p-2 rounded-full bg-[#F0F1EB] text-[#68736B] hover:text-[#26332D] cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-[#F6F5F0] border border-[#E4E6DE] space-y-1.5 text-xs">
+              <div className="font-bold text-[#26332D]">¿Qué es esta sección?</div>
+              <p className="text-[#68736B] leading-relaxed">
+                {currentStepGuide.summary}
+              </p>
+              <div className="font-bold text-[#34483D] pt-1">
+                ¿Para qué le sirve a tu calendario?
+              </div>
+              <p className="text-[#26332D] leading-relaxed">
+                {currentStepGuide.whyItMatters}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-bold text-[#26332D]">
+                Qué llenar en cada campo de este formulario:
+              </div>
+              {currentStepGuide.fields.map((item) => (
+                <div
+                  key={item.field}
+                  className="p-3 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] space-y-1 text-xs"
+                >
+                  <div className="font-bold text-[#34483D]">{item.field}</div>
+                  <p className="text-[#26332D] leading-relaxed">
+                    {item.explanation}
+                  </p>
+                  {item.tip && (
+                    <div className="text-[11px] text-[#68736B] bg-[#F6F5F0] px-2.5 py-1.5 rounded-lg border border-[#E4E6DE]/80">
+                      💡 {item.tip}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="p-3 rounded-2xl bg-[#EDF7F2] border border-[#C6E7D6] text-xs space-y-1">
+              <div className="font-bold text-[#23845B] flex items-center gap-1.5">
+                <Lightbulb className="w-3.5 h-3.5" />
+                <span>Ejemplo práctico</span>
+              </div>
+              <p className="text-[#26332D] leading-relaxed">
+                {currentStepGuide.example}
+              </p>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-[#FEF7EC] border border-[#F5DDA8] text-[11px] text-[#26332D] leading-relaxed">
+              <strong>Nota útil:</strong> {currentStepGuide.note}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsStepHelpOpen(false)}
+              className="w-full py-3 rounded-xl bg-[#34483D] hover:bg-[#26332D] text-white text-xs font-semibold cursor-pointer"
+            >
+              Entendido, seguir completando este paso
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 
