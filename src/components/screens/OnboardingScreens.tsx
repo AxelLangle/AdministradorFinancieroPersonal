@@ -567,7 +567,9 @@ export function OnboardingScreens() {
                   min={1}
                   max={31}
                   value={newIncomeDay}
-                  onChange={(e) => setNewIncomeDay(e.target.value)}
+                  onChange={(e) =>
+                    setNewIncomeDay(e.target.value.replace(/^0+(?=\d)/, ""))
+                  }
                   placeholder="Ej. 15"
                   className="w-full px-3 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs tabular-nums text-[#26332D]"
                 />
@@ -722,7 +724,9 @@ export function OnboardingScreens() {
                 min={1}
                 max={31}
                 value={newExpenseDay}
-                onChange={(e) => setNewExpenseDay(e.target.value)}
+                onChange={(e) =>
+                  setNewExpenseDay(e.target.value.replace(/^0+(?=\d)/, ""))
+                }
                 placeholder="1–31"
                 className="w-full px-2.5 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs tabular-nums text-[#26332D]"
               />
