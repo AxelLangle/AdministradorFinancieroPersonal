@@ -24,8 +24,10 @@ import type {
   RecurrenceFrequency,
 } from "@/lib/finance/types";
 import {
+  AlertTriangle,
   ArrowLeft,
   Info,
+  HelpCircle,
   Repeat,
   CheckCircle2,
   Calendar,
@@ -38,12 +40,50 @@ import {
   Trash2,
 } from "lucide-react";
 
+const STATUS_MODE_GUIDE = {
+  income: {
+    question: "¿Ya recibiste este dinero o lo esperas después?",
+    futureTitle: "Programado",
+    futureSubtitle: "Aún no entra",
+    futureUseCase:
+      "Úsalo para quincenas futuras, bonos o pagos que esperas recibir después.",
+    futureEffect:
+      "No suma a tu Saldo Actual hoy; se contempla en tu Cierre Proyectado del mes hasta que confirmes el cobro.",
+    futureExample: "Ej. Tu sueldo del día 30 o un proyecto por cobrar.",
+    settledTitle: "Recibido",
+    settledSubtitle: "Ya entró a tu cuenta",
+    settledUseCase:
+      "Úsalo cuando el depósito o efectivo ya llegó a tu cuenta o cartera.",
+    settledEffect:
+      "Suma de inmediato a tu Saldo Actual (salvo fechas anteriores a tu corte inicial) y queda confirmado en tu calendario.",
+    settledExample: "Ej. Ya te depositaron tu sueldo hoy o cobraste ayer.",
+  },
+  expense: {
+    question: "¿Ya realizaste este pago o lo pagarás después?",
+    futureTitle: "Pendiente",
+    futureSubtitle: "Por pagar después",
+    futureUseCase:
+      "Úsalo para recibos, renta o compromisos que todavía NO pagas.",
+    futureEffect:
+      "No cambia tu Saldo Actual hoy, pero se aparta en tu Cierre Proyectado y en tu Presupuesto del mes.",
+    futureExample: "Ej. Recibo de luz del día 20 o renta del próximo mes.",
+    settledTitle: "Pagado",
+    settledSubtitle: "Ya salió el dinero",
+    settledUseCase:
+      "Úsalo para compras o pagos que ya hiciste hoy o en días pasados.",
+    settledEffect:
+      "Se descuenta de inmediato de tu Saldo Actual y permanece visible como Pagado en tu calendario.",
+    settledExample: "Ej. Despensa que pagaste hoy o recibo ya liquidado.",
+  },
+} as const;
+
 export function TransactionModalsScreens() {
   const {
     activeScreen,
     setActiveScreen,
     goBack,
     selectedDate,
+    setSelectedDate,
     selectedTransactionId,
     setSelectedTransactionId,
     account,
@@ -78,6 +118,7 @@ export function TransactionModalsScreens() {
   const [recurringFrequency, setRecurringFrequency] =
     useState<RecurrenceFrequency>("monthly");
   const [notes, setNotes] = useState("");
+  const [showStatusGuide, setShowStatusGuide] = useState(false);
 
   const availableCats = categories.filter(
     (c) =>
@@ -157,6 +198,12 @@ export function TransactionModalsScreens() {
   ) {
     const isPriorToCutoff =
       isSettledMode && isDateBeforeOpeningBalance(dateVal, account);
+    const isFutureSettled = isSettledMode && dateVal > referenceDate;
+    const isPastScheduledIncome =
+      !isSettledMode && isIncomeScreen && dateVal < referenceDate;
+    const modeGuide = isIncomeScreen
+      ? STATUS_MODE_GUIDE.income
+      : STATUS_MODE_GUIDE.expense;
 
     const handleSave = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -278,46 +325,115 @@ export function TransactionModalsScreens() {
           </button>
         </div>
 
-        {/* Conmutador de Estado Dinámico */}
-        <div className="bg-[#FFFFFF] rounded-2xl p-3.5 border border-[#E4E6DE] mb-4">
-          <label className="block text-[11px] font-bold uppercase tracking-wider text-[#68736B] mb-2">
-            ¿En qué estado se encuentra este movimiento?
-          </label>
+        {/* Conmutador de Estado Dinámico con guía clara de diferencia y uso */}
+        <div className="bg-[#FFFFFF] rounded-2xl p-3.5 border border-[#E4E6DE] mb-4 space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-[#68736B]">
+              {modeGuide.question}
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowStatusGuide((prev) => !prev)}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#34483D] hover:underline shrink-0 cursor-pointer"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>{showStatusGuide ? "Ocultar tabla" : "¿Cuál elegir?"}</span>
+            </button>
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
               onClick={() => setActiveScreen(isIncomeScreen ? "P13" : "P12")}
-              className={`py-2.5 px-3 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+              className={`py-2.5 px-3 rounded-xl border text-left transition cursor-pointer ${
                 !isSettledMode
-                  ? "bg-[#34483D] text-white border-[#34483D]"
+                  ? "bg-[#34483D] text-white border-[#34483D] shadow-xs"
                   : "bg-[#F0F1EB] text-[#26332D] border-[#E4E6DE]"
               }`}
             >
-              {isIncomeScreen
-                ? "Programado (Por recibir)"
-                : "Pendiente (Por pagar)"}
+              <div className="text-xs font-bold">{modeGuide.futureTitle}</div>
+              <div
+                className={`text-[11px] mt-0.5 ${
+                  !isSettledMode ? "text-white/85" : "text-[#68736B]"
+                }`}
+              >
+                {modeGuide.futureSubtitle}
+              </div>
             </button>
             <button
               type="button"
               onClick={() => setActiveScreen(isIncomeScreen ? "P13B" : "P12B")}
-              className={`py-2.5 px-3 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+              className={`py-2.5 px-3 rounded-xl border text-left transition cursor-pointer ${
                 isSettledMode
-                  ? "bg-[#23845B] text-white border-[#23845B]"
+                  ? "bg-[#23845B] text-white border-[#23845B] shadow-xs"
                   : "bg-[#F0F1EB] text-[#26332D] border-[#E4E6DE]"
               }`}
             >
-              {isIncomeScreen ? "Ya recibido" : "Ya pagado"}
+              <div className="text-xs font-bold">{modeGuide.settledTitle}</div>
+              <div
+                className={`text-[11px] mt-0.5 ${
+                  isSettledMode ? "text-white/90" : "text-[#68736B]"
+                }`}
+              >
+                {modeGuide.settledSubtitle}
+              </div>
             </button>
           </div>
-          <p className="text-[11px] text-[#68736B] mt-2 leading-relaxed">
-            {!isSettledMode
-              ? isIncomeScreen
-                ? "Se agendará en el calendario y sumará a tu Saldo Proyectado hasta que confirmes su cobro."
-                : "Se agendará en el calendario y se descontará de tu Saldo Proyectado y Presupuesto Disponible."
-              : isIncomeScreen
-              ? "Impactará de inmediato tu Saldo Actual porque el dinero ya ingresó a tu cuenta."
-              : "Descontará de inmediato tu Saldo Actual porque el pago ya fue realizado."}
-          </p>
+
+          {/* Explicación práctica del modo activo */}
+          <div className="p-3 rounded-xl bg-[#F6F5F0] border border-[#E4E6DE] text-[11px] text-[#26332D] space-y-1 leading-relaxed">
+            <div>
+              <strong>¿Para qué usarlo?</strong>{" "}
+              {isSettledMode
+                ? modeGuide.settledUseCase
+                : modeGuide.futureUseCase}
+            </div>
+            <div>
+              <strong>¿Qué hace en tu dinero?</strong>{" "}
+              {isSettledMode
+                ? modeGuide.settledEffect
+                : modeGuide.futureEffect}
+            </div>
+            <div className="text-[#68736B]">
+              {isSettledMode
+                ? modeGuide.settledExample
+                : modeGuide.futureExample}
+            </div>
+          </div>
+
+          {/* Comparativa lado a lado desplegable */}
+          {showStatusGuide && (
+            <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+              <div className="p-2.5 rounded-xl bg-[#F0F5FA] border border-[#CFE0EE] space-y-1 text-[#26332D]">
+                <div className="font-bold text-[#527A9A]">
+                  {modeGuide.futureTitle}
+                </div>
+                <p>
+                  <strong>¿Ya ocurrió?</strong> No, es futuro.
+                </p>
+                <p>
+                  <strong>Saldo Actual:</strong> No cambia hoy.
+                </p>
+                <p>
+                  <strong>Cierre del mes:</strong> Sí se contempla.
+                </p>
+              </div>
+              <div className="p-2.5 rounded-xl bg-[#EDF7F2] border border-[#C6E7D6] space-y-1 text-[#26332D]">
+                <div className="font-bold text-[#23845B]">
+                  {modeGuide.settledTitle}
+                </div>
+                <p>
+                  <strong>¿Ya ocurrió?</strong> Sí, ya pasó.
+                </p>
+                <p>
+                  <strong>Saldo Actual:</strong> Cambia hoy mismo.
+                </p>
+                <p>
+                  <strong>Calendario:</strong> Queda confirmado.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         <form onSubmit={handleSave} className="space-y-4 flex-1">
@@ -418,6 +534,54 @@ export function TransactionModalsScreens() {
               />
             </div>
           </div>
+
+          {/* Aviso inteligente si la fecha elegida contradice el estado */}
+          {isFutureSettled && (
+            <div className="p-3.5 rounded-2xl bg-[#FEF6E7] border border-[#F5DFA8] flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-[#D99A32] shrink-0 mt-0.5" />
+              <div className="text-xs text-[#26332D] leading-relaxed space-y-1.5 flex-1">
+                <div>
+                  <strong className="text-[#9A6712] block mb-0.5">
+                    Elegiste &ldquo;{modeGuide.settledTitle}&rdquo; con fecha futura (
+                    {formatDateDDMMYYYY(dateVal)})
+                  </strong>
+                  Si ese dinero todavía no{" "}
+                  {isIncomeScreen ? "entra a tu cuenta" : "sale de tu cuenta"},
+                  cámbialo a <strong>{modeGuide.futureTitle}</strong> para no alterar tu Saldo Actual de hoy antes de tiempo.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveScreen(isIncomeScreen ? "P13" : "P12")}
+                  className="px-2.5 py-1 rounded-lg bg-[#9A6712] text-white text-[11px] font-semibold cursor-pointer"
+                >
+                  Cambiar a {modeGuide.futureTitle}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isPastScheduledIncome && (
+            <div className="p-3.5 rounded-2xl bg-[#FEF6E7] border border-[#F5DFA8] flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-[#D99A32] shrink-0 mt-0.5" />
+              <div className="text-xs text-[#26332D] leading-relaxed space-y-1.5 flex-1">
+                <div>
+                  <strong className="text-[#9A6712] block mb-0.5">
+                    Ingreso &ldquo;Programado&rdquo; con fecha pasada (
+                    {formatDateDDMMYYYY(dateVal)})
+                  </strong>
+                  Como esa fecha ya pasó y aún no se confirma el cobro, quedará marcado como{" "}
+                  <strong>Ingreso atrasado</strong> (no sumará a tu Saldo Proyectado hasta que confirmes que ya lo cobraste).
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveScreen("P13B")}
+                  className="px-2.5 py-1 rounded-lg bg-[#23845B] text-white text-[11px] font-semibold cursor-pointer"
+                >
+                  Ya lo cobré (cambiar a Recibido)
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Banner informativo azul cuando la fecha real es anterior a opening_balance_date */}
           {isPriorToCutoff && (
@@ -770,7 +934,9 @@ export function TransactionModalsScreens() {
           </div>
 
           {/* Reprogramación rápida */}
-          {tx.status !== "paid" && tx.status !== "received" && (
+          {tx.status !== "paid" &&
+            tx.status !== "received" &&
+            tx.status !== "cancelled" && (
             <div className="pt-3 border-t border-[#E4E6DE] flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <Calendar className="w-4 h-4 text-[#68736B]" />
@@ -819,27 +985,31 @@ export function TransactionModalsScreens() {
 
         {/* Acciones principales del movimiento */}
         <div className="space-y-2 pt-1">
-          {tx.type === "expense" && tx.status !== "paid" && (
-            <button
-              type="button"
-              onClick={() => setActiveScreen("P15")}
-              className="w-full py-3.5 px-4 rounded-xl bg-[#34483D] hover:bg-[#26332D] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Confirmar pago</span>
-            </button>
-          )}
+          {tx.type === "expense" &&
+            tx.status !== "paid" &&
+            tx.status !== "cancelled" && (
+              <button
+                type="button"
+                onClick={() => setActiveScreen("P15")}
+                className="w-full py-3.5 px-4 rounded-xl bg-[#34483D] hover:bg-[#26332D] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Confirmar pago</span>
+              </button>
+            )}
 
-          {tx.type === "income" && tx.status !== "received" && (
-            <button
-              type="button"
-              onClick={() => setActiveScreen("P16")}
-              className="w-full py-3.5 px-4 rounded-xl bg-[#23845B] hover:bg-[#1D6E4B] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Confirmar recepción de ingreso</span>
-            </button>
-          )}
+          {tx.type === "income" &&
+            tx.status !== "received" &&
+            tx.status !== "cancelled" && (
+              <button
+                type="button"
+                onClick={() => setActiveScreen("P16")}
+                className="w-full py-3.5 px-4 rounded-xl bg-[#23845B] hover:bg-[#1D6E4B] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Confirmar recepción de ingreso</span>
+              </button>
+            )}
 
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -904,6 +1074,7 @@ export function TransactionModalsScreens() {
         settledDate: confirmDateStr,
         notes: confirmNotes,
       });
+      setSelectedDate(confirmDateStr);
       setActiveScreen("P10");
     };
 
@@ -1080,6 +1251,7 @@ export function TransactionModalsScreens() {
         settledDate: confirmDateStr,
         notes: confirmNotes,
       });
+      setSelectedDate(confirmDateStr);
       setActiveScreen("P10");
     };
 
