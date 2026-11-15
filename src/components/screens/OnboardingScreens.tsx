@@ -2,10 +2,20 @@
 
 import React, { useState } from "react";
 import { useFinanceStore } from "@/lib/store/finance-store";
-import { formatDateDDMMYYYY, formatMXN } from "@/lib/finance/engine";
+import {
+  describeRecurrenceRuleSchedule,
+  formatDateDDMMYYYY,
+  formatMXN,
+  serializeRecurrenceSchedule,
+} from "@/lib/finance/engine";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { CurrencyInput } from "@/components/ui/CurrencyInput";
-import type { PriorityLevel, ScreenId } from "@/lib/finance/types";
+import type {
+  CustomScheduleDayItem,
+  PriorityLevel,
+  RecurrenceFrequency,
+  ScreenId,
+} from "@/lib/finance/types";
 import {
   ArrowLeft,
   ArrowRight,
@@ -18,6 +28,9 @@ import {
   Target,
   Sparkles,
   HelpCircle,
+  Calendar as CalendarIcon,
+  CheckCircle2,
+  Clock,
 } from "lucide-react";
 import { useHorizontalSwipe } from "@/lib/hooks/useSwipeGesture";
 
@@ -29,6 +42,23 @@ const ONBOARDING_STEPS: { id: ScreenId; step: number; label: string }[] = [
   { id: "P09", step: 5, label: "Gastos fijos" },
 ];
 
+type IncomeScheduleKind =
+  | "semimonthly"
+  | "biweekly"
+  | "calendar_multi"
+  | "weekly"
+  | "monthly";
+
+const WEEKDAYS_OPTIONS = [
+  { value: 1, label: "Lunes" },
+  { value: 2, label: "Martes" },
+  { value: 3, label: "Miércoles" },
+  { value: 4, label: "Jueves" },
+  { value: 5, label: "Viernes" },
+  { value: 6, label: "Sábado" },
+  { value: 0, label: "Domingo" },
+];
+
 export function OnboardingScreens() {
   const {
     activeScreen,
@@ -38,18 +68,41 @@ export function OnboardingScreens() {
     categories,
     completeOnboarding,
     setIsTutorialOpen,
+    referenceDate,
   } = useFinanceStore();
 
+  // Estados de Ingresos (Paso 4 - P08)
   const [newIncomeTitle, setNewIncomeTitle] = useState("");
   const [newIncomeAmount, setNewIncomeAmount] = useState("");
-  const [newIncomeFreq, setNewIncomeFreq] = useState<"semimonthly" | "monthly">(
-    "semimonthly"
-  );
+  const [newIncomeSecondAmount, setNewIncomeSecondAmount] = useState("");
+  const [hasDifferentAmounts, setHasDifferentAmounts] = useState(false);
+  const [newIncomeAmountType, setNewIncomeAmountType] = useState<
+    "fixed" | "variable"
+  >("fixed");
+  const [incomeScheduleKind, setIncomeScheduleKind] =
+    useState<IncomeScheduleKind>("semimonthly");
+  const [semimonthlyPreset, setSemimonthlyPreset] = useState<
+    "15,last" | "10,25" | "5,20" | "1,15"
+  >("15,last");
   const [newIncomeDay, setNewIncomeDay] = useState("15");
+  const [newIncomeWeekday, setNewIncomeWeekday] = useState<number>(5);
+  const [newIncomeBiweeklyStart, setNewIncomeBiweeklyStart] =
+    useState<string>(referenceDate);
+  const [selectedCalendarDays, setSelectedCalendarDays] = useState<
+    Array<number | "last">
+  >([15, "last"]);
+  const [customDayAmounts, setCustomDayAmounts] = useState<
+    Record<string, string>
+  >({});
+  const [weekendToFriday, setWeekendToFriday] = useState(true);
 
+  // Estados de Gastos Fijos (Paso 5 - P09)
   const [newExpenseTitle, setNewExpenseTitle] = useState("");
   const [newExpenseAmount, setNewExpenseAmount] = useState("");
   const [newExpenseDay, setNewExpenseDay] = useState("1");
+  const [newExpenseFreq, setNewExpenseFreq] =
+    useState<RecurrenceFrequency>("monthly");
+  const [newExpenseWeekday, setNewExpenseWeekday] = useState<number>(1);
   const [newExpensePriority, setNewExpensePriority] =
     useState<PriorityLevel>("essential");
   const [newExpenseAmountType, setNewExpenseAmountType] = useState<
@@ -75,6 +128,22 @@ export function OnboardingScreens() {
       }
     },
   });
+
+  const toggleCalendarDay = (dayVal: number | "last") => {
+    setSelectedCalendarDays((prev) => {
+      const exists = prev.includes(dayVal);
+      if (exists) {
+        if (prev.length <= 1) return prev;
+        return prev.filter((d) => d !== dayVal);
+      }
+      const next = [...prev, dayVal];
+      return next.sort((a, b) => {
+        const na = a === "last" ? 99 : a;
+        const nb = b === "last" ? 99 : b;
+        return na - nb;
+      });
+    });
+  };
 
   const renderStepHeader = (prevScreen: ScreenId) => (
     <div className="mb-5">
@@ -124,13 +193,12 @@ export function OnboardingScreens() {
   if (activeScreen === "P05") {
     return (
       <div
-      {...onboardingSwipeHandlers}
-      className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
-    >
+        {...onboardingSwipeHandlers}
+        className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
+      >
         <div>
           {renderStepHeader("P01")}
 
-          {/* Tarjeta introductoria para el nuevo usuario */}
           <div className="p-3.5 rounded-2xl bg-[#EDF7F2] border border-[#C6E7D6] mb-4 flex items-start gap-2.5">
             <Sparkles className="w-4 h-4 text-[#23845B] shrink-0 mt-0.5" />
             <div className="text-xs text-[#26332D] leading-relaxed">
@@ -222,9 +290,9 @@ export function OnboardingScreens() {
     const presets = [10000, 15000, 20000, 30000];
     return (
       <div
-      {...onboardingSwipeHandlers}
-      className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
-    >
+        {...onboardingSwipeHandlers}
+        className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
+      >
         <div>
           {renderStepHeader("P05")}
 
@@ -345,9 +413,9 @@ export function OnboardingScreens() {
 
     return (
       <div
-      {...onboardingSwipeHandlers}
-      className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
-    >
+        {...onboardingSwipeHandlers}
+        className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
+      >
         <div>
           {renderStepHeader("P06")}
 
@@ -358,7 +426,6 @@ export function OnboardingScreens() {
             Cada categoría asigna automáticamente un nivel de prioridad a tus gastos para ayudarte a distinguir lo obligatorio de lo opcional:
           </p>
 
-          {/* Explicación de las 3 prioridades */}
           <div className="bg-[#FFFFFF] p-3.5 rounded-2xl border border-[#E4E6DE] mb-3 space-y-1.5 text-xs">
             <div className="flex items-center gap-2">
               <PriorityBadge priority="essential" compact />
@@ -411,7 +478,9 @@ export function OnboardingScreens() {
                         {cat.name}
                       </div>
                       <div className="text-[11px] text-[#68736B]">
-                        {cat.kind === "income" ? "Categoría de ingreso" : "Categoría de gasto"}
+                        {cat.kind === "income"
+                          ? "Categoría de ingreso"
+                          : "Categoría de gasto"}
                       </div>
                     </div>
                   </div>
@@ -434,11 +503,109 @@ export function OnboardingScreens() {
     );
   }
 
-  // Paso 4: Primeros ingresos
+  // Paso 4: Primeros ingresos (con Catorcena grande/pequeña, Quincenal flexible, Semanal, Mensual y Calendario Multi-selección)
   if (activeScreen === "P08") {
     const handleAddIncome = () => {
-      const numeric = Number(String(newIncomeAmount).replace(/,/g, "")) || 0;
-      if (!newIncomeTitle.trim() || numeric <= 0) return;
+      const baseAmount = Number(String(newIncomeAmount).replace(/,/g, "")) || 0;
+      const secondAmount =
+        Number(String(newIncomeSecondAmount).replace(/,/g, "")) || 0;
+      if (!newIncomeTitle.trim() || baseAmount <= 0) return;
+
+      let frequency: RecurrenceFrequency = "monthly";
+      let dayOfMonth = Number(newIncomeDay) || 15;
+      let semimonthlyDays: string | null = null;
+      let dayOfWeek: number | null = null;
+      let startDate = `${referenceDate.slice(0, 7)}-01`;
+
+      const weekendShift = weekendToFriday ? "friday" : "none";
+
+      if (incomeScheduleKind === "biweekly") {
+        frequency = "biweekly";
+        startDate = newIncomeBiweeklyStart || referenceDate;
+        dayOfMonth = Number(startDate.slice(8, 10)) || 15;
+        semimonthlyDays = serializeRecurrenceSchedule({
+          alternateAmount:
+            hasDifferentAmounts && secondAmount > 0 ? secondAmount : null,
+          weekendShift,
+        });
+      } else if (incomeScheduleKind === "weekly") {
+        frequency = "weekly";
+        dayOfWeek = newIncomeWeekday;
+        semimonthlyDays = serializeRecurrenceSchedule({
+          alternateAmount:
+            hasDifferentAmounts && secondAmount > 0 ? secondAmount : null,
+          weekendShift: "none",
+        });
+      } else if (incomeScheduleKind === "semimonthly") {
+        frequency = "semimonthly";
+        const [d1Raw, d2Raw] = semimonthlyPreset.split(",");
+        const d1: number | "last" =
+          d1Raw === "last" ? "last" : Number(d1Raw) || 15;
+        const d2: number | "last" =
+          d2Raw === "last" ? "last" : Number(d2Raw) || 30;
+        dayOfMonth = typeof d1 === "number" ? d1 : 15;
+        const items: CustomScheduleDayItem[] = [
+          { day: d1, amount: baseAmount },
+          {
+            day: d2,
+            amount:
+              hasDifferentAmounts && secondAmount > 0
+                ? secondAmount
+                : baseAmount,
+          },
+        ];
+        semimonthlyDays = serializeRecurrenceSchedule({
+          items,
+          weekendShift,
+        });
+      } else if (incomeScheduleKind === "calendar_multi") {
+        frequency = selectedCalendarDays.length === 2 ? "semimonthly" : "monthly";
+        const firstDay = selectedCalendarDays[0];
+        dayOfMonth = typeof firstDay === "number" ? firstDay : 15;
+        const items: CustomScheduleDayItem[] = selectedCalendarDays.map((d) => {
+          const key = String(d);
+          const customVal =
+            Number(String(customDayAmounts[key] || "").replace(/,/g, "")) || 0;
+          return {
+            day: d,
+            amount:
+              hasDifferentAmounts && customVal > 0 ? customVal : baseAmount,
+          };
+        });
+        semimonthlyDays = serializeRecurrenceSchedule({
+          items,
+          weekendShift,
+        });
+      } else {
+        frequency = "monthly";
+        dayOfMonth = Math.min(31, Math.max(1, Number(newIncomeDay) || 15));
+        semimonthlyDays = serializeRecurrenceSchedule({
+          items: [{ day: dayOfMonth === 31 ? "last" : dayOfMonth }],
+          weekendShift,
+        });
+      }
+
+      const scheduleSummary = describeRecurrenceRuleSchedule({
+        id: "preview",
+        workspace_id: "",
+        account_id: "",
+        type: "income",
+        title: newIncomeTitle.trim(),
+        category_id: null,
+        priority: "essential",
+        amount_type: newIncomeAmountType,
+        default_amount: baseAmount,
+        frequency,
+        interval_count: 1,
+        day_of_month: dayOfMonth,
+        semimonthly_days: semimonthlyDays,
+        day_of_week: dayOfWeek,
+        start_date: startDate,
+        end_date: null,
+        status: "active",
+        notes: null,
+      });
+
       setOnboardingDraft((prev) => ({
         ...prev,
         incomes: [
@@ -446,29 +613,36 @@ export function OnboardingScreens() {
           {
             id: `onb-inc-${Date.now()}`,
             title: newIncomeTitle.trim(),
-            amount: numeric,
-            frequency: newIncomeFreq,
-            dayOfMonth: Number(newIncomeDay) || 15,
+            amount: baseAmount,
+            amountType: newIncomeAmountType,
+            frequency,
+            dayOfMonth,
+            semimonthlyDays,
+            dayOfWeek,
+            startDate,
+            scheduleSummary,
           },
         ],
       }));
       setNewIncomeTitle("");
       setNewIncomeAmount("");
+      setNewIncomeSecondAmount("");
+      setCustomDayAmounts({});
     };
 
     return (
       <div
-      {...onboardingSwipeHandlers}
-      className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
-    >
+        {...onboardingSwipeHandlers}
+        className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
+      >
         <div>
           {renderStepHeader("P07")}
 
           <h1 className="text-2xl font-bold text-[#26332D] mb-1.5">
-            4. ¿Qué ingresos fijos recibes en el mes?
+            4. ¿Cómo y cuándo recibes tus ingresos?
           </h1>
-          <p className="text-xs text-[#68736B] leading-relaxed mb-4">
-            Agrega tu sueldo, nómina o ingresos periódicos. Esto le permite al calendario calcular cuánto dinero te quedará antes y después de cada fecha de cobro. (Opcional: también puedes agregarlos después).
+          <p className="text-xs text-[#68736B] leading-relaxed mb-3">
+            Adapta tus cobros a tu realidad: quincenal, catorcenal (incluso si recibes una <strong>catorcena grande y otra pequeña</strong>), semanal, mensual o eligiendo varios días directamente en el calendario.
           </p>
 
           {onboardingDraft.incomes.length > 0 && (
@@ -476,21 +650,22 @@ export function OnboardingScreens() {
               {onboardingDraft.incomes.map((inc) => (
                 <div
                   key={inc.id}
-                  className="bg-[#FFFFFF] p-3.5 rounded-2xl border border-[#E4E6DE] flex items-center justify-between"
+                  className="bg-[#FFFFFF] p-3.5 rounded-2xl border border-[#E4E6DE] flex items-center justify-between gap-2"
                 >
                   <div>
                     <div className="text-sm font-bold text-[#26332D]">
                       {inc.title}
                     </div>
-                    <div className="text-xs text-[#68736B]">
-                      {inc.frequency === "semimonthly"
-                        ? "Quincenal (Días 15 y último de mes)"
-                        : `Mensual (Día ${inc.dayOfMonth} de cada mes)`}
+                    <div className="text-[11px] text-[#68736B]">
+                      {inc.scheduleSummary ||
+                        (inc.frequency === "semimonthly"
+                          ? "Quincenal (Días 15 y último de mes)"
+                          : `Mensual (Día ${inc.dayOfMonth} de cada mes)`)}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     <span className="text-sm font-bold tabular-nums text-[#23845B]">
-                      +{formatMXN(inc.amount)}
+                      +{formatMXN(inc.amount, { approximate: inc.amountType === "variable" })}
                     </span>
                     <button
                       type="button"
@@ -510,9 +685,9 @@ export function OnboardingScreens() {
             </div>
           )}
 
-          <div className="bg-[#FFFFFF] p-4 rounded-2xl border border-[#E4E6DE] space-y-3">
+          <div className="bg-[#FFFFFF] p-4 rounded-2xl border border-[#E4E6DE] space-y-3.5">
             <div className="text-xs font-bold text-[#26332D]">
-              Agregar un ingreso esperado
+              Configurar fuente de ingreso
             </div>
 
             <div>
@@ -523,44 +698,168 @@ export function OnboardingScreens() {
                 type="text"
                 value={newIncomeTitle}
                 onChange={(e) => setNewIncomeTitle(e.target.value)}
-                placeholder="Ej. Nómina quincenal, Sueldo o Renta cobrada"
+                placeholder="Ej. Nómina catorcenal, Sueldo quincenal, Comisiones o Renta"
                 className="w-full px-3.5 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs text-[#26332D] placeholder:text-[#68736B]/60"
               />
             </div>
 
+            {/* Selector visual de esquema de cobro */}
             <div>
-              <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
-                Monto por cada cobro (MXN)
+              <label className="block text-[11px] font-semibold text-[#68736B] mb-1.5">
+                ¿Con qué frecuencia o esquema lo recibes?
               </label>
-              <CurrencyInput
-                value={newIncomeAmount}
-                placeholder="Ej. 9,000.00"
-                onChange={(raw) => setNewIncomeAmount(raw)}
-                inputClassName="w-full pl-9 pr-4 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-sm font-bold tabular-nums text-[#26332D] placeholder:text-[#68736B]/60 placeholder:font-normal"
-              />
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                {[
+                  { id: "semimonthly", label: "Quincenal (2/mes)" },
+                  { id: "biweekly", label: "Catorcenal (14 días)" },
+                  { id: "calendar_multi", label: "Calendario (Multi-día)" },
+                  { id: "weekly", label: "Semanal (7 días)" },
+                  { id: "monthly", label: "Mensual (1/mes)" },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() =>
+                      setIncomeScheduleKind(opt.id as IncomeScheduleKind)
+                    }
+                    className={`py-2 px-2.5 rounded-xl text-[11px] font-semibold border transition cursor-pointer ${
+                      incomeScheduleKind === opt.id
+                        ? "bg-[#34483D] text-white border-[#34483D]"
+                        : "bg-[#F0F1EB] text-[#26332D] border-[#E4E6DE]"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
-                  ¿Cada cuánto lo recibes?
+            {/* Configuración específica según el esquema elegido */}
+            {incomeScheduleKind === "semimonthly" && (
+              <div className="p-3 rounded-xl bg-[#F6F5F0] border border-[#E4E6DE] space-y-2.5">
+                <label className="block text-[11px] font-semibold text-[#26332D]">
+                  ¿Qué par de días del mes cobras tus quincenas?
                 </label>
-                <select
-                  value={newIncomeFreq}
-                  onChange={(e) =>
-                    setNewIncomeFreq(
-                      e.target.value as "semimonthly" | "monthly"
-                    )
-                  }
-                  className="w-full px-3 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs text-[#26332D]"
-                >
-                  <option value="semimonthly">Quincenal (15 y fin de mes)</option>
-                  <option value="monthly">Mensual (1 vez al mes)</option>
-                </select>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(
+                    [
+                      { id: "15,last", label: "Días 15 y fin de mes" },
+                      { id: "10,25", label: "Días 10 y 25" },
+                      { id: "5,20", label: "Días 5 y 20" },
+                      { id: "1,15", label: "Días 1 y 15" },
+                    ] as const
+                  ).map((pair) => (
+                    <button
+                      key={pair.id}
+                      type="button"
+                      onClick={() => setSemimonthlyPreset(pair.id)}
+                      className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                        semimonthlyPreset === pair.id
+                          ? "bg-[#23845B] text-white border-[#23845B]"
+                          : "bg-[#FFFFFF] text-[#26332D] border-[#E4E6DE]"
+                      }`}
+                    >
+                      {pair.label}
+                    </button>
+                  ))}
+                </div>
               </div>
+            )}
+
+            {incomeScheduleKind === "biweekly" && (
+              <div className="p-3 rounded-xl bg-[#F6F5F0] border border-[#E4E6DE] space-y-2.5">
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#26332D] mb-1">
+                    Fecha de un cobro catorcenal tuyo (sirve de punto de partida cada 14 días)
+                  </label>
+                  <input
+                    type="date"
+                    value={newIncomeBiweeklyStart}
+                    onChange={(e) => setNewIncomeBiweeklyStart(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#26332D]"
+                  />
+                  <span className="block text-[10px] text-[#68736B] mt-1">
+                    Calcularemos cada 14 días exactos (incluyendo cuando un mes trae 3 catorcenas).
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {incomeScheduleKind === "calendar_multi" && (
+              <div className="p-3 rounded-xl bg-[#F6F5F0] border border-[#E4E6DE] space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-semibold text-[#26332D] flex items-center gap-1.5">
+                    <CalendarIcon className="w-3.5 h-3.5 text-[#23845B]" />
+                    <span>Toca todos los días del mes en que recibes este ingreso:</span>
+                  </label>
+                  <span className="text-[10px] font-bold text-[#23845B]">
+                    {selectedCalendarDays.length} seleccionado(s)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-7 gap-1">
+                  {Array.from({ length: 31 }, (_, i) => i + 1).map((dayNum) => {
+                    const isSelected = selectedCalendarDays.includes(dayNum);
+                    return (
+                      <button
+                        key={dayNum}
+                        type="button"
+                        onClick={() => toggleCalendarDay(dayNum)}
+                        className={`h-8 rounded-lg text-xs font-bold tabular-nums border transition cursor-pointer ${
+                          isSelected
+                            ? "bg-[#23845B] text-white border-[#23845B] shadow-2xs"
+                            : "bg-[#FFFFFF] text-[#26332D] border-[#E4E6DE] hover:border-[#91A68C]"
+                        }`}
+                      >
+                        {dayNum}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => toggleCalendarDay("last")}
+                  className={`w-full py-1.5 px-3 rounded-lg text-[11px] font-semibold border transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                    selectedCalendarDays.includes("last")
+                      ? "bg-[#23845B] text-white border-[#23845B]"
+                      : "bg-[#FFFFFF] text-[#26332D] border-[#E4E6DE]"
+                  }`}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Último día de cada mes (28, 30 o 31 según el mes)</span>
+                </button>
+              </div>
+            )}
+
+            {incomeScheduleKind === "weekly" && (
+              <div className="p-3 rounded-xl bg-[#F6F5F0] border border-[#E4E6DE]">
+                <label className="block text-[11px] font-semibold text-[#26332D] mb-1.5">
+                  ¿Qué día de la semana te pagan?
+                </label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {WEEKDAYS_OPTIONS.map((w) => (
+                    <button
+                      key={w.value}
+                      type="button"
+                      onClick={() => setNewIncomeWeekday(w.value)}
+                      className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                        newIncomeWeekday === w.value
+                          ? "bg-[#23845B] text-white border-[#23845B]"
+                          : "bg-[#FFFFFF] text-[#26332D] border-[#E4E6DE]"
+                      }`}
+                    >
+                      {w.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {incomeScheduleKind === "monthly" && (
               <div>
                 <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
-                  Día de cobro (1–31)
+                  Día de cobro del mes (1–31, usa 31 para fin de mes)
                 </label>
                 <input
                   type="number"
@@ -570,10 +869,141 @@ export function OnboardingScreens() {
                   onChange={(e) =>
                     setNewIncomeDay(e.target.value.replace(/^0+(?=\d)/, ""))
                   }
-                  placeholder="Ej. 15"
-                  className="w-full px-3 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs tabular-nums text-[#26332D]"
+                  placeholder="Ej. 15 o 30"
+                  className="w-full px-3.5 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-bold tabular-nums text-[#26332D]"
                 />
               </div>
+            )}
+
+            {/* Opción de Montos Alternados / Diferenciados (ej. Catorcena grande $9,500 y pequeña $8,500) */}
+            {(incomeScheduleKind === "biweekly" ||
+              incomeScheduleKind === "semimonthly" ||
+              (incomeScheduleKind === "calendar_multi" &&
+                selectedCalendarDays.length > 1) ||
+              incomeScheduleKind === "weekly") && (
+              <div className="p-3 rounded-xl bg-[#EDF7F2]/70 border border-[#C6E7D6] space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-bold text-[#26332D]">
+                    ¿Recibes un cobro grande y otro pequeño?
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setHasDifferentAmounts((prev) => !prev)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                      hasDifferentAmounts
+                        ? "bg-[#23845B] text-white border-[#23845B]"
+                        : "bg-[#FFFFFF] text-[#26332D] border-[#E4E6DE]"
+                    }`}
+                  >
+                    {hasDifferentAmounts
+                      ? "Sí, montos distintos"
+                      : "No, siempre igual"}
+                  </button>
+                </div>
+                <p className="text-[10px] text-[#68736B] leading-relaxed">
+                  Ideal si te llega una <strong>catorcena/quincena grande</strong> (ej. $9,500 con vales o bono) y otra <strong>pequeña</strong> (ej. $8,500).
+                </p>
+              </div>
+            )}
+
+            {/* Campos de Monto según si son iguales o diferenciados */}
+            <div className="space-y-2.5">
+              <div>
+                <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
+                  {hasDifferentAmounts &&
+                  (incomeScheduleKind === "biweekly" ||
+                    incomeScheduleKind === "semimonthly" ||
+                    incomeScheduleKind === "weekly")
+                    ? "Monto del 1er cobro (ej. Catorcena / Quincena grande)"
+                    : "Monto base por cobro (MXN)"}
+                </label>
+                <CurrencyInput
+                  value={newIncomeAmount}
+                  placeholder="Ej. 9,500.00"
+                  onChange={(raw) => setNewIncomeAmount(raw)}
+                  inputClassName="w-full pl-9 pr-4 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-sm font-bold tabular-nums text-[#26332D] placeholder:text-[#68736B]/60 placeholder:font-normal"
+                />
+              </div>
+
+              {hasDifferentAmounts &&
+                (incomeScheduleKind === "biweekly" ||
+                  incomeScheduleKind === "semimonthly" ||
+                  incomeScheduleKind === "weekly") && (
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
+                      Monto del 2do cobro alternado (ej. Catorcena / Quincena pequeña)
+                    </label>
+                    <CurrencyInput
+                      value={newIncomeSecondAmount}
+                      placeholder="Ej. 8,500.00"
+                      onChange={(raw) => setNewIncomeSecondAmount(raw)}
+                      inputClassName="w-full pl-9 pr-4 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-sm font-bold tabular-nums text-[#26332D] placeholder:text-[#68736B]/60 placeholder:font-normal"
+                    />
+                  </div>
+                )}
+
+              {hasDifferentAmounts &&
+                incomeScheduleKind === "calendar_multi" &&
+                selectedCalendarDays.length > 1 && (
+                  <div className="space-y-2 pt-1">
+                    <div className="text-[11px] font-semibold text-[#26332D]">
+                      Personaliza el monto de cada día seleccionado (si dejas alguno vacío usará el monto base):
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {selectedCalendarDays.map((d) => {
+                        const key = String(d);
+                        return (
+                          <div key={key} className="flex items-center gap-2">
+                            <span className="text-[11px] font-bold text-[#34483D] w-20 shrink-0">
+                              {d === "last" ? "Fin de mes:" : `Día ${d}:`}
+                            </span>
+                            <div className="flex-1">
+                              <CurrencyInput
+                                value={customDayAmounts[key] || ""}
+                                placeholder={newIncomeAmount || "Ej. 8,500"}
+                                onChange={(raw) =>
+                                  setCustomDayAmounts((prev) => ({
+                                    ...prev,
+                                    [key]: raw,
+                                  }))
+                                }
+                                inputClassName="w-full pl-8 pr-2.5 py-1.5 rounded-lg bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-bold tabular-nums text-[#26332D]"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+            </div>
+
+            {/* Opciones de adaptabilidad: Fijo vs Variable y Fin de Semana */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <select
+                value={newIncomeAmountType}
+                onChange={(e) =>
+                  setNewIncomeAmountType(
+                    e.target.value as "fixed" | "variable"
+                  )
+                }
+                className="px-3 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs text-[#26332D]"
+              >
+                <option value="fixed">Monto fijo ($ seguro)</option>
+                <option value="variable">Monto variable / comisión (~$)</option>
+              </select>
+
+              {incomeScheduleKind !== "weekly" && (
+                <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-[11px] text-[#26332D] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={weekendToFriday}
+                    onChange={(e) => setWeekendToFriday(e.target.checked)}
+                    className="accent-[#34483D]"
+                  />
+                  <span>Si cae en sáb/dom, mover a viernes</span>
+                </label>
+              )}
             </div>
 
             <button
@@ -603,6 +1033,38 @@ export function OnboardingScreens() {
   const handleAddFixedExpense = () => {
     const numeric = Number(String(newExpenseAmount).replace(/,/g, "")) || 0;
     if (!newExpenseTitle.trim() || numeric <= 0) return;
+
+    const dayOfMonth = Math.min(31, Math.max(1, Number(newExpenseDay) || 1));
+    const semimonthlyDays =
+      newExpenseFreq === "semimonthly" ? "15,last" : null;
+    const dayOfWeek =
+      newExpenseFreq === "weekly" ? newExpenseWeekday : null;
+    const startDate =
+      newExpenseFreq === "biweekly"
+        ? referenceDate
+        : `${referenceDate.slice(0, 7)}-01`;
+
+    const scheduleSummary = describeRecurrenceRuleSchedule({
+      id: "preview-exp",
+      workspace_id: "",
+      account_id: "",
+      type: "expense",
+      title: newExpenseTitle.trim(),
+      category_id: categories[0]?.id || "cat-servicios",
+      priority: newExpensePriority,
+      amount_type: newExpenseAmountType,
+      default_amount: numeric,
+      frequency: newExpenseFreq,
+      interval_count: 1,
+      day_of_month: dayOfMonth,
+      semimonthly_days: semimonthlyDays,
+      day_of_week: dayOfWeek,
+      start_date: startDate,
+      end_date: null,
+      status: "active",
+      notes: null,
+    });
+
     setOnboardingDraft((prev) => ({
       ...prev,
       fixedExpenses: [
@@ -611,7 +1073,12 @@ export function OnboardingScreens() {
           id: `onb-exp-${Date.now()}`,
           title: newExpenseTitle.trim(),
           amount: numeric,
-          dayOfMonth: Number(newExpenseDay) || 1,
+          dayOfMonth,
+          frequency: newExpenseFreq,
+          semimonthlyDays,
+          dayOfWeek,
+          startDate,
+          scheduleSummary,
           priority: newExpensePriority,
           amountType: newExpenseAmountType,
           categoryId: categories[0]?.id || "cat-servicios",
@@ -631,14 +1098,45 @@ export function OnboardingScreens() {
         {renderStepHeader("P08")}
 
         <h1 className="text-2xl font-bold text-[#26332D] mb-1.5">
-          5. Programa tus gastos fijos de cada mes
+          5. Programa tus gastos recurrentes
         </h1>
         <p className="text-xs text-[#68736B] leading-relaxed mb-3">
-          Agrega tus pagos recurrentes como renta, internet, luz o suscripciones para que aparezcan en tu calendario y descuenten de tu proyección antes de que los gastes en otra cosa.
+          Registra aquí únicamente los compromisos periódicos que se repiten para que el calendario los aparte automáticamente de tu dinero disponible.
         </p>
 
+        {/* Guía clara: ¿Qué gastos SÍ encajan aquí y cuáles NO? */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
+          <div className="p-3 rounded-2xl bg-[#EDF7F2] border border-[#C6E7D6] text-[11px] text-[#26332D] leading-relaxed">
+            <div className="font-bold text-[#23845B] flex items-center gap-1.5 mb-1">
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+              <span>¿Qué gastos SÍ van aquí?</span>
+            </div>
+            <p>
+              Pagos que se repiten con fecha fija cada mes, bimestre o semana:{" "}
+              <strong>
+                renta, hipoteca, internet, luz (CFE), agua, gas, plan celular, colegiaturas, suscripciones (Netflix, gimnasio)
+              </strong>{" "}
+              y el pago mensual de tu tarjeta o crédito.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-[#F0F5FA] border border-[#CFE0EE] text-[11px] text-[#26332D] leading-relaxed">
+            <div className="font-bold text-[#527A9A] flex items-center gap-1.5 mb-1">
+              <Clock className="w-3.5 h-3.5 shrink-0" />
+              <span>¿Cuáles NO van aquí? (Se agregan después)</span>
+            </div>
+            <p>
+              <strong>
+                Comidas fuera, cafés, antojos, salidas, ropa, regalos o compras únicas.
+              </strong>{" "}
+              No los pongas aquí: esos gastos del día a día los podrás agregar después en cualquier momento con el botón{" "}
+              <strong>+</strong> dentro de tu calendario.
+            </p>
+          </div>
+        </div>
+
         {/* Recomendación de tarjetas de crédito */}
-        <div className="p-3.5 rounded-2xl bg-[#FEF9EE] border border-[#F5E1B9] flex items-start gap-2.5 mb-3">
+        <div className="p-3 rounded-2xl bg-[#FEF9EE] border border-[#F5E1B9] flex items-start gap-2.5 mb-3">
           <CreditCard className="w-4 h-4 text-[#9A6712] shrink-0 mt-0.5" />
           <div className="text-[11px] text-[#26332D] leading-relaxed">
             <strong className="text-[#9A6712] block">
@@ -649,7 +1147,7 @@ export function OnboardingScreens() {
         </div>
 
         {onboardingDraft.fixedExpenses.length > 0 && (
-          <div className="space-y-2 mb-3 max-h-[26vh] overflow-y-auto pr-1">
+          <div className="space-y-2 mb-3 max-h-[24vh] overflow-y-auto pr-1">
             {onboardingDraft.fixedExpenses.map((exp) => (
               <div
                 key={exp.id}
@@ -663,7 +1161,7 @@ export function OnboardingScreens() {
                     <PriorityBadge priority={exp.priority} compact />
                   </div>
                   <div className="text-[11px] text-[#68736B] mt-0.5">
-                    Día {exp.dayOfMonth} de cada mes •{" "}
+                    {exp.scheduleSummary || `Día ${exp.dayOfMonth} de cada mes`} •{" "}
                     {exp.amountType === "variable"
                       ? "Monto estimado (~)"
                       : "Monto fijo"}
@@ -697,7 +1195,7 @@ export function OnboardingScreens() {
 
         <div className="bg-[#FFFFFF] p-3.5 rounded-2xl border border-[#E4E6DE] space-y-2.5">
           <div className="text-xs font-bold text-[#26332D]">
-            Añadir un gasto recurrente mensual
+            Añadir un compromiso recurrente
           </div>
           <div>
             <input
@@ -715,23 +1213,59 @@ export function OnboardingScreens() {
               onChange={(raw) => setNewExpenseAmount(raw)}
               inputClassName="w-full pl-8 pr-3 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-bold tabular-nums text-[#26332D] placeholder:text-[#68736B]/60 placeholder:font-normal"
             />
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-[#68736B] shrink-0">
-                Día del mes:
-              </span>
-              <input
-                type="number"
-                min={1}
-                max={31}
-                value={newExpenseDay}
-                onChange={(e) =>
-                  setNewExpenseDay(e.target.value.replace(/^0+(?=\d)/, ""))
-                }
-                placeholder="1–31"
-                className="w-full px-2.5 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs tabular-nums text-[#26332D]"
-              />
-            </div>
+            <select
+              value={newExpenseFreq}
+              onChange={(e) =>
+                setNewExpenseFreq(e.target.value as RecurrenceFrequency)
+              }
+              className="px-2.5 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs text-[#26332D]"
+            >
+              <option value="monthly">Mensual (cada mes)</option>
+              <option value="bimonthly">Bimestral (ej. Luz CFE)</option>
+              <option value="semimonthly">Quincenal (15 y fin)</option>
+              <option value="biweekly">Catorcenal (cada 14 días)</option>
+              <option value="weekly">Semanal (cada 7 días)</option>
+            </select>
           </div>
+
+          {newExpenseFreq === "weekly" ? (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-[#68736B] shrink-0">
+                Día de pago:
+              </span>
+              <select
+                value={newExpenseWeekday}
+                onChange={(e) => setNewExpenseWeekday(Number(e.target.value))}
+                className="w-full px-2.5 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs text-[#26332D]"
+              >
+                {WEEKDAYS_OPTIONS.map((w) => (
+                  <option key={w.value} value={w.value}>
+                    Cada {w.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            newExpenseFreq !== "semimonthly" &&
+            newExpenseFreq !== "biweekly" && (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-[#68736B] shrink-0">
+                  Día de vencimiento en el mes (1–31):
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={newExpenseDay}
+                  onChange={(e) =>
+                    setNewExpenseDay(e.target.value.replace(/^0+(?=\d)/, ""))
+                  }
+                  placeholder="1–31"
+                  className="w-24 px-2.5 py-1.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-bold tabular-nums text-[#26332D]"
+                />
+              </div>
+            )
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <select
@@ -766,7 +1300,7 @@ export function OnboardingScreens() {
             className="w-full py-2 rounded-xl bg-[#F0F1EB] hover:bg-[#E8DCCB] text-xs font-semibold text-[#34483D] flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Agregar este compromiso a la lista</span>
+            <span>Agregar este compromiso recurrente</span>
           </button>
         </div>
       </div>
@@ -782,3 +1316,4 @@ export function OnboardingScreens() {
     </div>
   );
 }
+
