@@ -8,19 +8,22 @@ import {
   formatMXN,
   formatNumberWithCommas,
   getEffectiveAmount,
-  parseRecurrenceSchedule,
-  serializeRecurrenceSchedule,
 } from "@/lib/finance/engine";
 import {
   PriorityBadge,
   PriorityGeometryIcon,
 } from "@/components/ui/PriorityBadge";
 import { CurrencyInput } from "@/components/ui/CurrencyInput";
+import {
+  RecurrenceScheduleBuilder,
+  buildRuleScheduleFields,
+  createDefaultScheduleConfig,
+  ruleToScheduleConfig,
+  type RecurrenceScheduleConfig,
+} from "@/components/ui/RecurrenceScheduleBuilder";
 import type {
   AmountType,
-  CustomScheduleDayItem,
   PriorityLevel,
-  RecurrenceFrequency,
   TransactionType,
 } from "@/lib/finance/types";
 import {
@@ -43,31 +46,8 @@ import {
   Sun,
   Trash2,
   Target,
-  Calendar as CalendarIcon,
-  Check,
   HelpCircle,
 } from "lucide-react";
-
-const FREQ_LABELS: Record<RecurrenceFrequency, string> = {
-  weekly: "Semanal (cada 7 días)",
-  biweekly: "Catorcenal (cada 14 días)",
-  semimonthly: "Quincenal (2 veces al mes)",
-  monthly: "Mensual (1 o más días del mes)",
-  bimonthly: "Bimestral (cada 2 meses)",
-  quarterly: "Trimestral (cada 3 meses)",
-  semiannual: "Semestral (cada 6 meses)",
-  annual: "Anual (1 vez al año)",
-};
-
-const WEEKDAYS_ES_OPTIONS = [
-  { value: 1, label: "Lunes" },
-  { value: 2, label: "Martes" },
-  { value: 3, label: "Miércoles" },
-  { value: 4, label: "Jueves" },
-  { value: 5, label: "Viernes" },
-  { value: 6, label: "Sábado" },
-  { value: 0, label: "Domingo" },
-];
 
 export function ManagementScreens() {
   const {
@@ -112,21 +92,11 @@ export function ManagementScreens() {
   const [ruleType, setRuleType] = useState<TransactionType>("expense");
   const [ruleTitle, setRuleTitle] = useState("");
   const [ruleAmountNum, setRuleAmountNum] = useState(0);
-  const [ruleSecondAmountNum, setRuleSecondAmountNum] = useState(0);
-  const [ruleHasAltAmount, setRuleHasAltAmount] = useState(false);
   const [ruleAmountType, setRuleAmountType] = useState<AmountType>("fixed");
-  const [ruleFreq, setRuleFreq] = useState<RecurrenceFrequency>("monthly");
-  const [ruleDay, setRuleDay] = useState("1");
-  const [ruleWeekday, setRuleWeekday] = useState<number>(5);
-  const [ruleStartDate, setRuleStartDate] = useState<string>(referenceDate);
-  const [ruleUseMultiDayCalendar, setRuleUseMultiDayCalendar] = useState(false);
-  const [ruleSelectedDays, setRuleSelectedDays] = useState<
-    Array<number | "last">
-  >([15, "last"]);
-  const [ruleCustomDayAmounts, setRuleCustomDayAmounts] = useState<
-    Record<string, number>
-  >({});
-  const [ruleWeekendToFriday, setRuleWeekendToFriday] = useState(false);
+  const [ruleScheduleConfig, setRuleScheduleConfig] =
+    useState<RecurrenceScheduleConfig>(() =>
+      createDefaultScheduleConfig(referenceDate, "monthly", referenceDate)
+    );
   const [rulePriority, setRulePriority] = useState<PriorityLevel>("essential");
   const [ruleCategoryId, setRuleCategoryId] = useState("");
   const [ruleNotes, setRuleNotes] = useState("");
@@ -155,48 +125,11 @@ export function ManagementScreens() {
 
   useEffect(() => {
     if (activeScreen === "P24" && selectedRule) {
-      const parsed = parseRecurrenceSchedule(selectedRule);
       setRuleType(selectedRule.type);
       setRuleTitle(selectedRule.title);
       setRuleAmountNum(selectedRule.default_amount ?? 0);
       setRuleAmountType(selectedRule.amount_type);
-      setRuleFreq(selectedRule.frequency);
-      setRuleDay(String(selectedRule.day_of_month ?? 1));
-      setRuleWeekday(selectedRule.day_of_week ?? 5);
-      setRuleStartDate(selectedRule.start_date || referenceDate);
-      setRuleWeekendToFriday(parsed.weekendShift === "friday");
-
-      if (parsed.alternateAmount && parsed.alternateAmount > 0) {
-        setRuleHasAltAmount(true);
-        setRuleSecondAmountNum(parsed.alternateAmount);
-      } else if (
-        parsed.items.length === 2 &&
-        parsed.items[1].amount &&
-        parsed.items[1].amount !== selectedRule.default_amount
-      ) {
-        setRuleHasAltAmount(true);
-        setRuleSecondAmountNum(parsed.items[1].amount);
-      } else {
-        setRuleHasAltAmount(false);
-        setRuleSecondAmountNum(0);
-      }
-
-      if (parsed.items.length > 1) {
-        setRuleUseMultiDayCalendar(selectedRule.frequency === "monthly");
-        setRuleSelectedDays(parsed.items.map((i) => i.day));
-        const map: Record<string, number> = {};
-        parsed.items.forEach((it) => {
-          if (it.amount && it.amount > 0) {
-            map[String(it.day)] = it.amount;
-          }
-        });
-        setRuleCustomDayAmounts(map);
-      } else {
-        setRuleUseMultiDayCalendar(false);
-        setRuleSelectedDays([15, "last"]);
-        setRuleCustomDayAmounts({});
-      }
-
+      setRuleScheduleConfig(ruleToScheduleConfig(selectedRule, referenceDate));
       setRulePriority(selectedRule.priority);
       setRuleCategoryId(
         selectedRule.category_id || categories[0]?.id || ""
@@ -206,17 +139,10 @@ export function ManagementScreens() {
       setRuleType("expense");
       setRuleTitle("");
       setRuleAmountNum(0);
-      setRuleSecondAmountNum(0);
-      setRuleHasAltAmount(false);
       setRuleAmountType("fixed");
-      setRuleFreq("monthly");
-      setRuleDay("1");
-      setRuleWeekday(5);
-      setRuleStartDate(referenceDate);
-      setRuleUseMultiDayCalendar(false);
-      setRuleSelectedDays([15, "last"]);
-      setRuleCustomDayAmounts({});
-      setRuleWeekendToFriday(false);
+      setRuleScheduleConfig(
+        createDefaultScheduleConfig(referenceDate, "monthly", referenceDate)
+      );
       setRulePriority("essential");
       setRuleCategoryId(categories[0]?.id || "");
       setRuleNotes("");
@@ -400,81 +326,13 @@ export function ManagementScreens() {
       (t) => t.status !== "paid" && t.status !== "received"
     );
 
-    const toggleRuleCalendarDay = (dayVal: number | "last") => {
-      setRuleSelectedDays((prev) => {
-        const exists = prev.includes(dayVal);
-        if (exists) {
-          if (prev.length <= 1) return prev;
-          return prev.filter((d) => d !== dayVal);
-        }
-        const next = [...prev, dayVal];
-        return next.sort((a, b) => {
-          const na = a === "last" ? 99 : a;
-          const nb = b === "last" ? 99 : b;
-          return na - nb;
-        });
-      });
-    };
-
     const handleSaveRule = async (e: React.FormEvent) => {
       e.preventDefault();
-      const weekendShift = ruleWeekendToFriday ? "friday" : "none";
-      let semimonthlyDays: string | null = null;
-      let dayOfMonth = Math.min(31, Math.max(1, Number(ruleDay) || 1));
-      let dayOfWeek: number | null = null;
-
-      if (ruleFreq === "biweekly") {
-        dayOfMonth = Number(ruleStartDate.slice(8, 10)) || 15;
-        semimonthlyDays = serializeRecurrenceSchedule({
-          alternateAmount:
-            ruleHasAltAmount && ruleSecondAmountNum > 0
-              ? ruleSecondAmountNum
-              : null,
-          weekendShift,
-        });
-      } else if (ruleFreq === "weekly") {
-        dayOfWeek = ruleWeekday;
-        semimonthlyDays = serializeRecurrenceSchedule({
-          alternateAmount:
-            ruleHasAltAmount && ruleSecondAmountNum > 0
-              ? ruleSecondAmountNum
-              : null,
-          weekendShift: "none",
-        });
-      } else if (
-        ruleFreq === "semimonthly" ||
-        (ruleFreq === "monthly" && ruleUseMultiDayCalendar)
-      ) {
-        const firstDay = ruleSelectedDays[0];
-        dayOfMonth = typeof firstDay === "number" ? firstDay : 15;
-        const items: CustomScheduleDayItem[] = ruleSelectedDays.map(
-          (d, idx) => {
-            const customVal = ruleCustomDayAmounts[String(d)];
-            let amt = ruleAmountNum;
-            if (ruleHasAltAmount) {
-              if (customVal && customVal > 0) {
-                amt = customVal;
-              } else if (
-                ruleSelectedDays.length === 2 &&
-                idx === 1 &&
-                ruleSecondAmountNum > 0
-              ) {
-                amt = ruleSecondAmountNum;
-              }
-            }
-            return { day: d, amount: amt };
-          }
-        );
-        semimonthlyDays = serializeRecurrenceSchedule({
-          items,
-          weekendShift,
-        });
-      } else {
-        semimonthlyDays = serializeRecurrenceSchedule({
-          items: [{ day: dayOfMonth === 31 ? "last" : dayOfMonth }],
-          weekendShift,
-        });
-      }
+      const scheduleFields = buildRuleScheduleFields(
+        ruleScheduleConfig,
+        ruleAmountNum,
+        referenceDate
+      );
 
       if (isEdit && selectedRule) {
         await updateRecurrenceRule(selectedRule.id, {
@@ -482,11 +340,11 @@ export function ManagementScreens() {
           title: ruleTitle.trim() || selectedRule.title,
           default_amount: ruleAmountNum,
           amount_type: ruleAmountType,
-          frequency: ruleFreq,
-          day_of_month: dayOfMonth,
-          semimonthly_days: semimonthlyDays,
-          day_of_week: dayOfWeek,
-          start_date: ruleStartDate,
+          frequency: scheduleFields.frequency,
+          day_of_month: scheduleFields.dayOfMonth,
+          semimonthly_days: scheduleFields.semimonthlyDays,
+          day_of_week: scheduleFields.dayOfWeek,
+          start_date: scheduleFields.startDate,
           priority: rulePriority,
           category_id: ruleCategoryId || null,
           notes: ruleNotes,
@@ -499,12 +357,12 @@ export function ManagementScreens() {
           priority: rulePriority,
           amount_type: ruleAmountType,
           default_amount: ruleAmountNum,
-          frequency: ruleFreq,
+          frequency: scheduleFields.frequency,
           interval_count: 1,
-          day_of_month: dayOfMonth,
-          semimonthly_days: semimonthlyDays,
-          day_of_week: dayOfWeek,
-          start_date: ruleStartDate,
+          day_of_month: scheduleFields.dayOfMonth,
+          semimonthly_days: scheduleFields.semimonthlyDays,
+          day_of_week: scheduleFields.dayOfWeek,
+          start_date: scheduleFields.startDate,
           end_date: null,
           status: "active",
           notes: ruleNotes || null,
@@ -580,30 +438,7 @@ export function ManagementScreens() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-[#68736B] mb-1">
-                  Frecuencia
-                </label>
-                <select
-                  value={ruleFreq}
-                  onChange={(e) => {
-                    const nextF = e.target.value as RecurrenceFrequency;
-                    setRuleFreq(nextF);
-                    if (nextF === "semimonthly" && ruleSelectedDays.length < 2) {
-                      setRuleSelectedDays([15, "last"]);
-                    }
-                  }}
-                  className="w-full px-3 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-semibold text-[#26332D]"
-                >
-                  {Object.entries(FREQ_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-[#68736B] mb-1">
                   Categoría
@@ -622,261 +457,7 @@ export function ManagementScreens() {
                     ))}
                 </select>
               </div>
-            </div>
 
-            {/* Selector de fechas según frecuencia (Calendario Multi-selección, Catorcenal, Semanal o Día único) */}
-            {ruleFreq === "monthly" && (
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#F6F5F0] border border-[#E4E6DE]">
-                <span className="text-xs font-semibold text-[#26332D]">
-                  ¿Se repite en varios días específicos del mes?
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setRuleUseMultiDayCalendar((prev) => !prev)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer ${
-                    ruleUseMultiDayCalendar
-                      ? "bg-[#34483D] text-white border-[#34483D]"
-                      : "bg-[#FFFFFF] text-[#26332D] border-[#E4E6DE]"
-                  }`}
-                >
-                  {ruleUseMultiDayCalendar
-                    ? "Calendario múltiple activo"
-                    : "Elegir varios días en calendario"}
-                </button>
-              </div>
-            )}
-
-            {(ruleFreq === "semimonthly" ||
-              (ruleFreq === "monthly" && ruleUseMultiDayCalendar)) && (
-              <div className="p-3 rounded-xl bg-[#F6F5F0] border border-[#E4E6DE] space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#26332D] flex items-center gap-1.5">
-                    <CalendarIcon className="w-3.5 h-3.5 text-[#23845B]" />
-                    <span>
-                      Selecciona los días del mes en el calendario:
-                    </span>
-                  </span>
-                  <span className="text-[11px] font-bold text-[#23845B]">
-                    {ruleSelectedDays.length} día(s)
-                  </span>
-                </div>
-
-                {ruleFreq === "semimonthly" && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      { label: "15 y fin de mes", days: [15, "last" as const] },
-                      { label: "10 y 25", days: [10, 25] },
-                      { label: "5 y 20", days: [5, 20] },
-                      { label: "1 y 15", days: [1, 15] },
-                    ].map((preset) => (
-                      <button
-                        key={preset.label}
-                        type="button"
-                        onClick={() => setRuleSelectedDays(preset.days)}
-                        className="px-2.5 py-1 rounded-lg bg-[#FFFFFF] border border-[#E4E6DE] text-[11px] font-semibold text-[#26332D] hover:border-[#23845B] cursor-pointer"
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-7 gap-1">
-                  {Array.from({ length: 31 }, (_, i) => i + 1).map((dNum) => {
-                    const active = ruleSelectedDays.includes(dNum);
-                    return (
-                      <button
-                        key={dNum}
-                        type="button"
-                        onClick={() => toggleRuleCalendarDay(dNum)}
-                        className={`h-8 rounded-lg text-xs font-bold tabular-nums border transition cursor-pointer ${
-                          active
-                            ? "bg-[#23845B] text-white border-[#23845B]"
-                            : "bg-[#FFFFFF] text-[#26332D] border-[#E4E6DE]"
-                        }`}
-                      >
-                        {dNum}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => toggleRuleCalendarDay("last")}
-                  className={`w-full py-1.5 px-3 rounded-lg text-[11px] font-semibold border transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                    ruleSelectedDays.includes("last")
-                      ? "bg-[#23845B] text-white border-[#23845B]"
-                      : "bg-[#FFFFFF] text-[#26332D] border-[#E4E6DE]"
-                  }`}
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Último día del mes (28, 30 o 31)</span>
-                </button>
-              </div>
-            )}
-
-            {ruleFreq === "biweekly" && (
-              <div className="p-3 rounded-xl bg-[#F6F5F0] border border-[#E4E6DE] space-y-1.5">
-                <label className="block text-xs font-semibold text-[#26332D]">
-                  Fecha de referencia del primer cobro/pago catorcenal
-                </label>
-                <input
-                  type="date"
-                  value={ruleStartDate}
-                  onChange={(e) => setRuleStartDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#26332D]"
-                />
-                <span className="block text-[10px] text-[#68736B]">
-                  A partir de esta fecha se programará cada 14 días exactos.
-                </span>
-              </div>
-            )}
-
-            {ruleFreq === "weekly" && (
-              <div className="p-3 rounded-xl bg-[#F6F5F0] border border-[#E4E6DE]">
-                <label className="block text-xs font-semibold text-[#26332D] mb-1.5">
-                  Día de la semana
-                </label>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {WEEKDAYS_ES_OPTIONS.map((w) => (
-                    <button
-                      key={w.value}
-                      type="button"
-                      onClick={() => setRuleWeekday(w.value)}
-                      className={`py-1.5 px-2 rounded-lg text-[11px] font-semibold border cursor-pointer ${
-                        ruleWeekday === w.value
-                          ? "bg-[#34483D] text-white border-[#34483D]"
-                          : "bg-[#FFFFFF] text-[#26332D] border-[#E4E6DE]"
-                      }`}
-                    >
-                      {w.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {ruleFreq !== "semimonthly" &&
-              ruleFreq !== "biweekly" &&
-              ruleFreq !== "weekly" &&
-              !(ruleFreq === "monthly" && ruleUseMultiDayCalendar) && (
-                <div>
-                  <label className="block text-xs font-semibold text-[#68736B] mb-1">
-                    Día del mes (1–31, usa 31 para último día)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={31}
-                    value={ruleDay}
-                    onChange={(e) =>
-                      setRuleDay(e.target.value.replace(/^0+(?=\d)/, ""))
-                    }
-                    placeholder="Ej. 15"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-bold tabular-nums text-[#26332D]"
-                  />
-                </div>
-              )}
-
-            {/* Opción de Montos Alternados (Catorcena grande y pequeña / Quincena 1 y 2 distintas) */}
-            {(ruleFreq === "biweekly" ||
-              ruleFreq === "semimonthly" ||
-              ruleFreq === "weekly" ||
-              (ruleFreq === "monthly" &&
-                ruleUseMultiDayCalendar &&
-                ruleSelectedDays.length > 1)) && (
-              <div className="p-3 rounded-xl bg-[#EDF7F2]/70 border border-[#C6E7D6] space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-[#26332D]">
-                    ¿Cambia el monto entre un cobro/pago y otro?
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setRuleHasAltAmount((prev) => !prev)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer ${
-                      ruleHasAltAmount
-                        ? "bg-[#23845B] text-white border-[#23845B]"
-                        : "bg-[#FFFFFF] text-[#26332D] border-[#E4E6DE]"
-                    }`}
-                  >
-                    {ruleHasAltAmount ? "Sí, montos distintos" : "No, monto igual"}
-                  </button>
-                </div>
-                <p className="text-[10px] text-[#68736B]">
-                  Úsalo si recibes una <strong>catorcena grande</strong> (ej. $9,500) y otra <strong>pequeña</strong> (ej. $8,500), o quincenas diferentes.
-                </p>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-[#68736B] mb-1">
-                {ruleHasAltAmount
-                  ? "Monto del 1er cobro/pago (ej. Catorcena o Quincena grande)"
-                  : "Monto base (MXN)"}
-              </label>
-              <CurrencyInput
-                value={ruleAmountNum}
-                onChange={(_, num) => setRuleAmountNum(num)}
-                prefix={ruleAmountType === "variable" ? "~$" : "$"}
-                placeholder="Ej. 9,500.00"
-                required
-              />
-            </div>
-
-            {ruleHasAltAmount &&
-              (ruleFreq === "biweekly" ||
-                ruleFreq === "weekly" ||
-                (ruleFreq === "semimonthly" &&
-                  ruleSelectedDays.length === 2)) && (
-                <div>
-                  <label className="block text-xs font-semibold text-[#68736B] mb-1">
-                    Monto del 2do cobro/pago alternado (ej. Catorcena o Quincena pequeña)
-                  </label>
-                  <CurrencyInput
-                    value={ruleSecondAmountNum}
-                    onChange={(_, num) => setRuleSecondAmountNum(num)}
-                    prefix={ruleAmountType === "variable" ? "~$" : "$"}
-                    placeholder="Ej. 8,500.00"
-                  />
-                </div>
-              )}
-
-            {ruleHasAltAmount &&
-              ((ruleFreq === "monthly" && ruleUseMultiDayCalendar) ||
-                (ruleFreq === "semimonthly" && ruleSelectedDays.length > 2)) && (
-                <div className="space-y-2">
-                  <div className="text-xs font-semibold text-[#26332D]">
-                    Monto específico para cada día seleccionado:
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {ruleSelectedDays.map((d) => {
-                      const key = String(d);
-                      return (
-                        <div key={key} className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-[#34483D] w-20 shrink-0">
-                            {d === "last" ? "Fin de mes:" : `Día ${d}:`}
-                          </span>
-                          <div className="flex-1">
-                            <CurrencyInput
-                              value={ruleCustomDayAmounts[key] || ""}
-                              placeholder={String(ruleAmountNum || 8500)}
-                              onChange={(_, num) =>
-                                setRuleCustomDayAmounts((prev) => ({
-                                  ...prev,
-                                  [key]: num,
-                                }))
-                              }
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-[#68736B] mb-1">
                   Tipo de monto
@@ -892,21 +473,30 @@ export function ManagementScreens() {
                   <option value="variable">Variable (~$ estimado)</option>
                 </select>
               </div>
-
-              {ruleFreq !== "weekly" && (
-                <div className="flex items-end">
-                  <label className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-semibold text-[#26332D] cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={ruleWeekendToFriday}
-                      onChange={(e) => setRuleWeekendToFriday(e.target.checked)}
-                      className="accent-[#34483D]"
-                    />
-                    <span>Si cae en sáb/dom, mover a viernes</span>
-                  </label>
-                </div>
-              )}
             </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[#68736B] mb-1">
+                Monto base (MXN)
+              </label>
+              <CurrencyInput
+                value={ruleAmountNum}
+                onChange={(_, num) => setRuleAmountNum(num)}
+                prefix={ruleAmountType === "variable" ? "~$" : "$"}
+                placeholder="Ej. 9,500.00"
+                required
+              />
+            </div>
+
+            <RecurrenceScheduleBuilder
+              transactionType={ruleType}
+              referenceDate={referenceDate}
+              value={ruleScheduleConfig}
+              onChange={setRuleScheduleConfig}
+              baseAmount={ruleAmountNum}
+              allowExtendedFrequencies={true}
+              allowDifferentAmounts={true}
+            />
 
             {ruleType === "expense" && (
               <div>
