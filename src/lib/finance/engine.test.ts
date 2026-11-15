@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  appearsOnCalendarDate,
   applyRecurrenceEditScope,
   calculateBudgetSummary,
   calculateCurrentBalance,
@@ -197,5 +198,35 @@ describe("Motor de Cálculo Financiero (PRD v1.1.2 - Dataset Maestro Sofía)", (
       filtered.some((t) => t.id === "tx-cancelled-test"),
       false
     );
+  });
+
+  it("9. Mantiene visibles en el calendario los movimientos confirmados en su fecha real y fecha original", () => {
+    const settledEarly = {
+      ...SOFIA_TRANSACTIONS[0],
+      id: "tx-settled-early",
+      type: "expense" as const,
+      status: "paid" as const,
+      expected_date: "2026-11-20",
+      settled_date: "2026-11-14",
+    };
+
+    assert.equal(appearsOnCalendarDate(settledEarly, "2026-11-14"), true);
+    assert.equal(appearsOnCalendarDate(settledEarly, "2026-11-20"), true);
+    assert.equal(appearsOnCalendarDate(settledEarly, "2026-11-15"), false);
+
+    const pendingTx = {
+      ...settledEarly,
+      status: "pending" as const,
+      settled_date: null,
+    };
+    assert.equal(appearsOnCalendarDate(pendingTx, "2026-11-20"), true);
+    assert.equal(appearsOnCalendarDate(pendingTx, "2026-11-14"), false);
+
+    const cancelledTx = {
+      ...settledEarly,
+      status: "cancelled" as const,
+    };
+    assert.equal(appearsOnCalendarDate(cancelledTx, "2026-11-14"), false);
+    assert.equal(appearsOnCalendarDate(cancelledTx, "2026-11-20"), false);
   });
 });
