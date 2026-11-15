@@ -19,6 +19,7 @@ import {
   Sparkles,
   HelpCircle,
 } from "lucide-react";
+import { useHorizontalSwipe } from "@/lib/hooks/useSwipeGesture";
 
 const ONBOARDING_STEPS: { id: ScreenId; step: number; label: string }[] = [
   { id: "P05", step: 1, label: "Saldo inicial" },
@@ -55,16 +56,33 @@ export function OnboardingScreens() {
     "fixed" | "variable"
   >("fixed");
 
-  const currentStepObj =
-    ONBOARDING_STEPS.find((s) => s.id === activeScreen) || ONBOARDING_STEPS[0];
+  const currentStepIdx = Math.max(
+    0,
+    ONBOARDING_STEPS.findIndex((s) => s.id === activeScreen)
+  );
+  const currentStepObj = ONBOARDING_STEPS[currentStepIdx] || ONBOARDING_STEPS[0];
+
+  const onboardingSwipeHandlers = useHorizontalSwipe({
+    threshold: 52,
+    onSwipeLeft: () => {
+      if (currentStepIdx < ONBOARDING_STEPS.length - 1) {
+        setActiveScreen(ONBOARDING_STEPS[currentStepIdx + 1].id);
+      }
+    },
+    onSwipeRight: () => {
+      if (currentStepIdx > 0) {
+        setActiveScreen(ONBOARDING_STEPS[currentStepIdx - 1].id);
+      }
+    },
+  });
 
   const renderStepHeader = (prevScreen: ScreenId) => (
     <div className="mb-5">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-2">
         <button
           type="button"
           onClick={() => setActiveScreen(prevScreen)}
-          className="inline-flex items-center gap-1 text-xs font-semibold text-[#68736B] hover:text-[#26332D] cursor-pointer"
+          className="min-h-[44px] px-2 -ml-2 rounded-xl inline-flex items-center gap-1 text-xs font-semibold text-[#68736B] hover:text-[#26332D] cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Atrás</span>
@@ -75,7 +93,7 @@ export function OnboardingScreens() {
         <button
           type="button"
           onClick={() => setIsTutorialOpen(true)}
-          className="inline-flex items-center gap-1 text-xs font-semibold text-[#34483D] hover:underline cursor-pointer"
+          className="min-h-[44px] px-2 -mr-2 rounded-xl inline-flex items-center gap-1 text-xs font-semibold text-[#34483D] hover:underline cursor-pointer"
         >
           <HelpCircle className="w-3.5 h-3.5" />
           <span>¿Cómo funciona?</span>
@@ -88,10 +106,15 @@ export function OnboardingScreens() {
             key={st.id}
             type="button"
             onClick={() => setActiveScreen(st.id)}
-            className={`h-1.5 rounded-full transition cursor-pointer ${
-              st.step <= currentStepObj.step ? "bg-[#34483D]" : "bg-[#E4E6DE]"
-            }`}
-          />
+            aria-label={`Ir al paso ${st.step}: ${st.label}`}
+            className="min-h-[24px] flex items-center cursor-pointer"
+          >
+            <span
+              className={`block w-full h-1.5 rounded-full transition ${
+                st.step <= currentStepObj.step ? "bg-[#34483D]" : "bg-[#E4E6DE]"
+              }`}
+            />
+          </button>
         ))}
       </div>
     </div>
@@ -100,7 +123,10 @@ export function OnboardingScreens() {
   // Paso 1: Saldo inicial y Fecha de corte
   if (activeScreen === "P05") {
     return (
-      <div className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]">
+      <div
+      {...onboardingSwipeHandlers}
+      className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
+    >
         <div>
           {renderStepHeader("P01")}
 
@@ -195,7 +221,10 @@ export function OnboardingScreens() {
   if (activeScreen === "P06") {
     const presets = [10000, 15000, 20000, 30000];
     return (
-      <div className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]">
+      <div
+      {...onboardingSwipeHandlers}
+      className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
+    >
         <div>
           {renderStepHeader("P05")}
 
@@ -315,7 +344,10 @@ export function OnboardingScreens() {
     };
 
     return (
-      <div className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]">
+      <div
+      {...onboardingSwipeHandlers}
+      className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
+    >
         <div>
           {renderStepHeader("P06")}
 
@@ -425,7 +457,10 @@ export function OnboardingScreens() {
     };
 
     return (
-      <div className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]">
+      <div
+      {...onboardingSwipeHandlers}
+      className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
+    >
         <div>
           {renderStepHeader("P07")}
 
@@ -586,7 +621,10 @@ export function OnboardingScreens() {
   };
 
   return (
-    <div className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]">
+    <div
+      {...onboardingSwipeHandlers}
+      className="flex-1 flex flex-col justify-between p-6 bg-[#F6F5F0]"
+    >
       <div>
         {renderStepHeader("P08")}
 
