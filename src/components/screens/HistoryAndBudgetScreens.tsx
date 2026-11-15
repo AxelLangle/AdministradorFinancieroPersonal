@@ -44,6 +44,7 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  HelpCircle,
 } from "lucide-react";
 
 interface SwipeableMovementRowProps {
@@ -194,6 +195,7 @@ export function HistoryAndBudgetScreens() {
     monthProjection,
     budgetSummary,
     nextIncomeStretch,
+    openTutorialAtPhase,
   } = useFinanceStore();
 
   // Estados para Editar Presupuesto y swipe de tarjeta
@@ -318,19 +320,30 @@ export function HistoryAndBudgetScreens() {
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setActiveScreen("P19")}
-            className="min-h-[44px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#26332D] hover:bg-[#F0F1EB] shadow-2xs cursor-pointer shrink-0"
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5 text-[#34483D]" />
-            <span>Filtros</span>
-            {activeFilterCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-[#34483D] text-white text-[10px]">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => openTutorialAtPhase(5)}
+              aria-label="¿Cómo usar Movimientos y Filtros?"
+              title="¿Cómo usar Movimientos y Filtros?"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#34483D] hover:bg-[#F0F1EB] shadow-2xs cursor-pointer"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveScreen("P19")}
+              className="min-h-[44px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#26332D] hover:bg-[#F0F1EB] shadow-2xs cursor-pointer shrink-0"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-[#34483D]" />
+              <span>Filtros</span>
+              {activeFilterCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-[#34483D] text-white text-[10px]">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Resumen rápido sincronizado del mes (Ingresos, Gastos y Flujo) */}
@@ -773,19 +786,30 @@ export function HistoryAndBudgetScreens() {
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setLimitNum(budget.total_limit);
-            setThresholdInput(budget.alert_threshold_percent);
-            setCushionPercentInput(budget.min_cushion_percent);
-            setActiveScreen("P21");
-          }}
-          className="min-h-[44px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#34483D] hover:bg-[#F0F1EB] cursor-pointer shrink-0"
-        >
-          <Edit3 className="w-3.5 h-3.5" />
-          <span>Editar límite</span>
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => openTutorialAtPhase(6)}
+            aria-label="¿Cómo usar Presupuesto y Hasta tu próximo ingreso?"
+            title="¿Cómo usar Presupuesto?"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#34483D] hover:bg-[#F0F1EB] cursor-pointer"
+          >
+            <HelpCircle className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setLimitNum(budget.total_limit);
+              setThresholdInput(budget.alert_threshold_percent);
+              setCushionPercentInput(budget.min_cushion_percent);
+              setActiveScreen("P21");
+            }}
+            className="min-h-[44px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#34483D] hover:bg-[#F0F1EB] cursor-pointer shrink-0"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>Editar límite</span>
+          </button>
+        </div>
       </div>
 
       {/* Tarjeta Principal con Anillo Dona y Barra Segmentada */}
