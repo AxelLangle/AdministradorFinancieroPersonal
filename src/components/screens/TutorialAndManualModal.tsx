@@ -63,25 +63,25 @@ const TUTORIAL_SLIDES = [
   },
   {
     step: 4,
-    badge: "Botón Central (+)",
-    title: "Registra gastos e ingresos en segundos",
+    badge: "Programado vs. Recibido",
+    title: "Diferencia entre compromisos futuros y dinero ya cobrado o pagado",
     description:
-      "Toca el botón circular (+) en la barra inferior para registrar cualquier movimiento:",
+      "Al registrar un movimiento con el botón (+) verás dos opciones clave según si el dinero ya se movió en la vida real o apenas ocurrirá:",
     highlights: [
-      "Pendiente / Programado: Úsalo para recibos o cobros futuros. Puedes marcar el monto como Fijo ($) o Variable (~$ estimado).",
-      "Ya pagado / Ya recibido: Úsalo para compras o depósitos que ya ocurrieron hoy o en días pasados.",
-      "Nota sobre Ingresos Atrasados: Si un ingreso esperado pasa de su fecha y aún no lo confirmas, no se suma al saldo proyectado para no inflar tu dinero con cobros inciertos.",
+      "Programado (Ingresos) / Pendiente (Gastos): Úsalo cuando todavía NO entra ni sale el dinero (ej. tu próxima quincena o el recibo de luz del día 20). No cambia tu Saldo Actual de hoy, pero sí calcula tu Cierre Proyectado.",
+      "Ya recibido (Ingresos) / Ya pagado (Gastos): Úsalo cuando el dinero YA entró o salió de tu cuenta (ej. cobraste hoy o compraste despensa). Modifica tu Saldo Actual al instante.",
+      "Ingresos atrasados: Si un ingreso 'Programado' pasa de su fecha sin confirmarse, se pausa de tu proyección hasta que confirmes que ya lo recibiste.",
     ],
   },
   {
     step: 5,
     badge: "Confirmación y Presupuesto",
-    title: "Del monto estimado al pago real",
+    title: "Confirma tus pagos sin que desaparezcan del calendario",
     description:
-      "Cuando llegue el día de pagar un recibo (como la luz o el internet), tócalo en el calendario y elige 'Confirmar pago':",
+      "Cuando pagues un recibo o te depositen un ingreso programado, tócalo y elige 'Confirmar pago' o 'Confirmar cobro':",
     highlights: [
-      "La app comparará automáticamente cuánto habías estimado contra cuánto pagaste realmente.",
-      "En la pestaña 'Presupuesto' verás tu anillo de consumo mensual y la tarjeta 'Hasta tu próximo ingreso', que te muestra el punto más bajo que tocará tu cuenta en el mes.",
+      "Todo movimiento confirmado como Pagado o Recibido permanece visible en la casilla del día con una palomita verde (✓) y en la sección 'Confirmados este mes' debajo del calendario.",
+      "Comparativa automática: Si estimaste ~$650 de luz y pagaste $610, la app guarda ambos montos y ajusta tu Saldo Proyectado y Presupuesto Disponible.",
       "Puedes volver a abrir este tutorial o el Manual Completo cuando quieras desde el icono (?) o el menú 'Más'.",
     ],
   },
@@ -114,8 +114,9 @@ const MANUAL_SECTIONS: ManualSection[] = [
       "Lectura visual del mes, marcadores geométricos por día y estados del semáforo.",
     bullets: [
       "Tarjeta de Resumen Superior: Muestra tu Saldo actual, tu Cierre proyectado de fin de mes, los ingresos recibidos vs. programados, los gastos pagados vs. pendientes y el avance de tu presupuesto. Al deslizar hacia abajo se compacta automáticamente.",
-      "Marcadores en cada día: Cada casilla del calendario muestra un punto verde si hay ingresos y las figuras geométricas de tus gastos (● Esencial, ◆ Importante, ○ Flexible).",
-      "Detalle del día: Al tocar cualquier día del calendario se abre una hoja inferior con todos los compromisos de esa fecha para confirmarlos, ver su detalle o agregar uno nuevo.",
+      "Marcadores y confirmados en cada día: Cada casilla del calendario muestra un punto verde si hay ingresos, las figuras geométricas de tus gastos (● Esencial, ◆ Importante, ○ Flexible) y una palomita verde (✓) cuando todos los movimientos de ese día ya fueron pagados o recibidos.",
+      "Visibilidad continua tras confirmar: Al confirmar un gasto como Pagado o un ingreso como Recibido, NO desaparece del calendario; permanece visible tanto en el día real de pago como en su fecha programada original y en la lista 'Confirmados este mes' debajo del calendario.",
+      "Detalle del día: Al tocar cualquier día del calendario se abre una hoja inferior con todos los compromisos de esa fecha (pendientes y confirmados) para revisarlos o agregar uno nuevo.",
       "Semáforo Verde (Proyección saludable): Tu cierre de mes es positivo y ningún día del mes baja de tu colchón mínimo de seguridad.",
       "Semáforo Ámbar (Atención / Proyección parcial): Algún día del mes tu saldo baja de tu colchón mínimo, o tienes gastos pendientes variables sin monto estimado.",
       "Semáforo Rojo (Riesgo de déficit): En algún día del mes o al cierre tus pagos superan el dinero disponible en cuenta (saldo menor a $0.00).",
@@ -123,12 +124,13 @@ const MANUAL_SECTIONS: ManualSection[] = [
   },
   {
     id: "movimientos-alta",
-    title: "3. Cómo Registrar Gastos e Ingresos (+)",
+    title: "3. Programado vs. Recibido y Pendiente vs. Pagado (+)",
     summary:
-      "Diferencia entre compromisos futuros y movimientos ya realizados, montos fijos y variables.",
+      "Para qué sirve cada estado, cómo afecta tu saldo hoy vs. fin de mes y cuándo usar cada uno.",
     bullets: [
-      "Gasto Pendiente vs. Ya Pagado: Elige 'Pendiente' para recibos o pagos que harás después (afectan tu saldo proyectado y tu presupuesto comprometido). Elige 'Ya pagado' para desembolsos que ya salieron de tu cuenta.",
-      "Ingreso Programado vs. Ya Recibido: Elige 'Programado' para quincenas o cobros futuros. Elige 'Ya recibido' cuando el dinero ya entró a tu cuenta.",
+      "Ingreso PROGRAMADO (¿para qué sirve?): Úsalo para dinero que AÚN NO entra a tu cuenta (ej. tu próxima quincena, un aguinaldo o una factura que un cliente te pagará la siguiente semana). NO aumenta tu Saldo Actual hoy, pero SÍ se suma a tu Saldo Proyectado de fin de mes para planear tus gastos.",
+      "Ingreso YA RECIBIDO (¿para qué sirve?): Úsalo cuando el dinero YA ingresó físicamente a tu banco o cartera hoy o en días pasados. Suma de inmediato a tu Saldo Actual (salvo fechas anteriores a tu corte inicial) y aparece confirmado en tu calendario sin quedar pendiente.",
+      "Gasto PENDIENTE vs. YA PAGADO: Elige 'Pendiente' para recibos o pagos futuros (reservan tu Saldo Proyectado y Presupuesto sin restar de tu Saldo Actual hoy). Elige 'Ya pagado' para desembolsos que ya salieron de tu cuenta.",
       "Monto Fijo ($) vs. Variable (~$): Usa 'Fijo' cuando conoces la cifra exacta (ej. renta o internet) y 'Variable' cuando es un cálculo aproximado (ej. recibo de luz o supermercado).",
     ],
   },
@@ -138,7 +140,7 @@ const MANUAL_SECTIONS: ManualSection[] = [
     summary:
       "Qué ocurre cuando pagas un recibo o recibes un depósito programado.",
     bullets: [
-      "Confirmar pago de gasto: Al tocar 'Confirmar pago' en un compromiso pendiente o vencido, puedes escribir el monto exacto que pagaste. El sistema te mostrará si pagaste más o menos de lo estimado y cómo cambia tu saldo actual y proyectado antes de guardar.",
+      "Confirmar pago de gasto: Al tocar 'Confirmar pago' en un compromiso pendiente o vencido, puedes escribir el monto exacto que pagaste. El sistema guarda tu cambio, actualiza tu Saldo Actual y mantiene visible el movimiento como 'Pagado' en tu calendario (en la cuadrícula y en 'Confirmados este mes').",
       "Confirmar recepción de ingreso: Cuando te depositan un ingreso programado o atrasado, confírmalo para que se sume a tu saldo actual.",
       "Regla de Ingresos Atrasados: Si un ingreso programado llega a su fecha esperada y no se ha confirmado como recibido, pasa a estado 'Ingreso atrasado' y deja de sumarse al saldo proyectado hasta que lo confirmes o lo reprogrames.",
       "Regla de Gastos Vencidos: Si un gasto pendiente pasa de su fecha sin pagarse, se marca como 'Vencido' en rojo y sigue restando en tu proyección hasta que lo pagues, reprogrames o canceles.",
@@ -265,6 +267,35 @@ export function InteractiveTutorialModal() {
             <PriorityBadge priority="essential" compact />
             <PriorityBadge priority="important" compact />
             <PriorityBadge priority="flexible" compact />
+          </div>
+        )}
+
+        {slide.step === 4 && (
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div className="p-3 rounded-2xl bg-[#F0F5FA] border border-[#CFE0EE] space-y-1 text-[#26332D]">
+              <div className="font-bold text-[#527A9A]">
+                Programado / Pendiente
+              </div>
+              <p>Aún no ocurre en tu cuenta.</p>
+              <p>
+                <strong>Hoy:</strong> no cambia tu saldo.
+              </p>
+              <p>
+                <strong>Fin de mes:</strong> sí proyecta.
+              </p>
+            </div>
+            <div className="p-3 rounded-2xl bg-[#EDF7F2] border border-[#C6E7D6] space-y-1 text-[#26332D]">
+              <div className="font-bold text-[#23845B]">
+                Ya recibido / Ya pagado
+              </div>
+              <p>Ya ocurrió en la vida real.</p>
+              <p>
+                <strong>Hoy:</strong> actualiza tu saldo ya.
+              </p>
+              <p>
+                <strong>Calendario:</strong> queda con ✓.
+              </p>
+            </div>
           </div>
         )}
 
