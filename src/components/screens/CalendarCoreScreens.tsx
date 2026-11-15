@@ -35,6 +35,7 @@ import {
   Calendar as CalendarIcon,
   X,
   ArrowUpRight,
+  Sparkles,
 } from "lucide-react";
 
 const WEEKDAYS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
@@ -56,11 +57,12 @@ export function CalendarCoreScreens() {
     budgetSummary,
     notifications,
     showToast,
+    setIsTutorialOpen,
   } = useFinanceStore();
 
   const [isSummaryCollapsed, setIsSummaryCollapsed] = useState(false);
 
-  // Colapso automático de la tarjeta de resumen al hacer scroll hacia abajo (PRD 5.2 / 6.3)
+  // Colapso automático de la tarjeta de resumen al hacer scroll hacia abajo
   useEffect(() => {
     const handleScroll = () => {
       if (window.scrollY > 150) {
@@ -74,7 +76,8 @@ export function CalendarCoreScreens() {
   }, []);
 
   const unreadCount = notifications.filter((n) => !n.read_at).length;
-  const { year, month, daysInMonth } = getMonthStartEnd(currentYearMonth);
+  const { year, month, daysInMonth, startDate, endDate } =
+    getMonthStartEnd(currentYearMonth);
 
   // Calcular offset del primer día del mes para semana que inicia en Lunes (0 = Lunes .. 6 = Domingo)
   const firstDayUtc = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
@@ -83,7 +86,7 @@ export function CalendarCoreScreens() {
   const getCategoryName = (catId: string | null) =>
     categories.find((c) => c.id === catId)?.name || "General";
 
-  // P33: Estado especial - Error de conexión / Modo sin conexión con caché
+  // Modo sin conexión con caché
   if (activeScreen === "P33") {
     return (
       <div className="flex-1 flex flex-col p-4 space-y-4">
@@ -118,7 +121,7 @@ export function CalendarCoreScreens() {
                 No pudimos sincronizar tus últimos movimientos
               </h2>
               <p className="text-xs text-[#68736B] mt-0.5 leading-relaxed">
-                Estás viendo una copia segura guardada en este dispositivo (última actualización: 18/11/2026 a las 08:00). Tus cifras están protegidas.
+                Estás viendo una copia segura guardada en este dispositivo. Tus cifras están protegidas.
               </p>
             </div>
           </div>
@@ -142,7 +145,7 @@ export function CalendarCoreScreens() {
           <div className="flex items-center justify-between text-xs text-[#68736B] mb-2">
             <span>Datos en caché (Solo lectura)</span>
             <span className="px-2 py-0.5 rounded-full bg-[#F0F1EB] text-[#68736B] font-medium">
-              18/11/2026
+              {formatDateDDMMYYYY(referenceDate)}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -166,7 +169,7 @@ export function CalendarCoreScreens() {
     );
   }
 
-  // P31: Estado especial - Inicio vacío (Cuenta recién creada sin movimientos)
+  // Estado especial - Inicio vacío explícito
   if (activeScreen === "P31") {
     return (
       <div className="flex-1 flex flex-col p-4 space-y-4">
@@ -184,7 +187,7 @@ export function CalendarCoreScreens() {
             onClick={() => setActiveScreen("P10")}
             className="px-3 py-1.5 rounded-xl bg-[#E8DCCB] text-[#26332D] text-xs font-semibold cursor-pointer"
           >
-            Ver con datos de Sofía
+            Volver al calendario
           </button>
         </div>
 
@@ -224,7 +227,7 @@ export function CalendarCoreScreens() {
             <CalendarIcon className="w-6 h-6" />
           </div>
           <h2 className="text-base font-bold text-[#26332D]">
-            Tu calendario de noviembre está listo para empezar
+            Tu calendario está listo para empezar
           </h2>
           <p className="text-xs text-[#68736B] max-w-xs mx-auto leading-relaxed">
             Registra tu próximo ingreso o tus pagos fijos del mes para ver cómo evolucionará tu dinero día por día.
@@ -252,19 +255,30 @@ export function CalendarCoreScreens() {
     );
   }
 
-  // P10 (Calendario principal), P11 (con Bottom Sheet de detalle del día), y P32 (Inicio con proyección incompleta)
+  // Filtrar transacciones del mes actual para alertas dinámicas
+  const monthTransactions = transactions.filter((tx) => {
+    if (tx.status === "cancelled") return false;
+    const d = getEffectiveDate(tx);
+    return d >= startDate && d <= endDate;
+  });
+
+  const overdueExpensesList = monthTransactions.filter((tx) =>
+    isExpenseOverdue(tx, referenceDate)
+  );
+  const delayedIncomesList = monthTransactions.filter((tx) =>
+    isIncomeDelayed(tx, referenceDate)
+  );
+  const unquantifiedExpensesList = monthTransactions.filter(
+    (tx) => tx.status === "pending" && isUnquantifiedExpense(tx)
+  );
+
   const dayTransactionsForSelectedDate = transactions.filter(
     (tx) =>
       tx.status !== "cancelled" && getEffectiveDate(tx) === selectedDate
   );
 
-  const upcomingCommitments = transactions
-    .filter(
-      (tx) =>
-        tx.status !== "cancelled" &&
-        tx.status !== "paid" &&
-        tx.status !== "received"
-    )
+  const upcomingCommitments = monthTransactions
+    .filter((tx) => tx.status !== "paid" && tx.status !== "received")
     .sort((a, b) => a.expected_date.localeCompare(b.expected_date));
 
   const trafficBadge =
@@ -307,7 +321,7 @@ export function CalendarCoreScreens() {
             </button>
             <div className="px-2 text-center">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-[#68736B]">
-                Cuenta principal • Hoy 18 Nov
+                Cuenta principal • Hoy {formatShortDateEs(referenceDate)}
               </div>
               <h1 className="text-base font-bold text-[#26332D]">
                 {formatMonthYearEs(currentYearMonth)}
@@ -353,7 +367,7 @@ export function CalendarCoreScreens() {
           </div>
         </div>
 
-        {/* Franja persistente compacta (72px max) cuando el usuario hace scroll o compacta (PRD 5.2) */}
+        {/* Franja persistente compacta cuando el usuario hace scroll o compacta */}
         {isSummaryCollapsed && (
           <div className="mt-2 py-2 px-3 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] flex items-center justify-between shadow-xs">
             <div className="flex items-center gap-3">
@@ -391,7 +405,7 @@ export function CalendarCoreScreens() {
       </header>
 
       <div className="p-4 space-y-4">
-        {/* Tarjeta de Resumen Financiero Expandida (P10 / P32) */}
+        {/* Tarjeta de Resumen Financiero Expandida */}
         {!isSummaryCollapsed && (
           <section
             aria-label="Resumen financiero del mes"
@@ -419,7 +433,7 @@ export function CalendarCoreScreens() {
               <div className="grid grid-cols-2 gap-3 pb-3 border-b border-[#E4E6DE]">
                 <div>
                   <div className="text-[11px] text-[#68736B]">
-                    Saldo actual (corte 18/11)
+                    Saldo actual (corte {formatShortDateEs(referenceDate)})
                   </div>
                   <div className="text-xl font-bold tabular-nums text-[#26332D] mt-0.5">
                     {formatMXN(monthProjection.currentBalance)}
@@ -511,61 +525,65 @@ export function CalendarCoreScreens() {
           </section>
         )}
 
-        {/* Banner de Alerta P32: Proyección incompleta por gastos sin monto estimado */}
-        {monthProjection.hasUnquantifiedPendingExpenses && (
+        {/* Banner de Alerta: Proyección incompleta por gastos sin monto estimado */}
+        {unquantifiedExpensesList.length > 0 && (
           <div className="p-3.5 rounded-2xl bg-[#FEF6E7] border border-[#F5DFA8] flex items-start gap-3">
             <HelpCircle className="w-5 h-5 text-[#D99A32] shrink-0 mt-0.5" />
             <div className="flex-1 text-xs">
               <div className="font-bold text-[#9A6712]">
-                Proyección parcial: {monthProjection.unquantifiedPendingExpensesCount} gastos sin monto estimado
+                Proyección parcial: {unquantifiedExpensesList.length}{" "}
+                {unquantifiedExpensesList.length === 1
+                  ? "gasto sin monto estimado"
+                  : "gastos sin monto estimado"}
               </div>
               <p className="text-[#26332D] mt-0.5 leading-relaxed">
-                Tienes compromisos variables en los días <strong>21 y 26 de noviembre</strong> marcados como &ldquo;Monto por definir&rdquo;. Asígnales un estimado para completar tu saldo proyectado.
+                Tienes compromisos marcados como &ldquo;Monto por definir&rdquo; (
+                {unquantifiedExpensesList.map((u) => u.title).join(", ")}). Asígnales un estimado para completar tu saldo proyectado.
               </p>
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedDate("2026-11-21");
-                    setActiveScreen("P11");
+                    const firstUnq = unquantifiedExpensesList[0];
+                    setSelectedTransactionId(firstUnq.id);
+                    setActiveScreen("P14");
                   }}
                   className="px-2.5 py-1 rounded-lg bg-[#9A6712] text-white font-semibold text-[11px] cursor-pointer"
                 >
-                  Revisar día 21 (Agua)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveScreen("P10")}
-                  className="px-2.5 py-1 rounded-lg bg-[#FFFFFF] border border-[#F5DFA8] text-[#9A6712] font-semibold text-[11px] cursor-pointer"
-                >
-                  Volver a vista completa (P10)
+                  Asignar monto estimado
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Banner de Vencidos y Atrasados (Sofía PRD 8.3: Recibo de luz CFE vencido 17/11 + Proyecto freelance atrasado 16/11) */}
-        {(monthProjection.overdueExpenseCount > 0 ||
-          monthProjection.delayedIncomeCount > 0) && (
-          <div className="bg-[#FDF5F2] border border-[#F1D8CE] rounded-2xl p-3.5 space-y-2">
-            {monthProjection.overdueExpenseCount > 0 && (
-              <div className="flex items-center justify-between gap-2">
+        {/* Banner Dinámico de Vencidos y Atrasados */}
+        {(overdueExpensesList.length > 0 || delayedIncomesList.length > 0) && (
+          <div className="bg-[#FDF5F2] border border-[#F1D8CE] rounded-2xl p-3.5 space-y-2.5">
+            {overdueExpensesList.map((tx) => (
+              <div
+                key={tx.id}
+                className="flex items-center justify-between gap-2"
+              >
                 <div className="flex items-center gap-2 text-xs">
                   <AlertTriangle className="w-4 h-4 text-[#C94C4C] shrink-0" />
                   <div>
                     <span className="font-bold text-[#C94C4C]">
-                      1 gasto vencido ayer (17 Nov):
+                      Gasto vencido ({formatShortDateEs(tx.expected_date)}):
                     </span>{" "}
                     <span className="text-[#26332D] font-medium">
-                      Recibo de luz CFE ({formatMXN(650, { approximate: true })})
+                      {tx.title} (
+                      {formatMXN(getEffectiveAmount(tx), {
+                        approximate: tx.amount_type === "variable",
+                      })}
+                      )
                     </span>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedTransactionId("tx-exp-05");
+                    setSelectedTransactionId(tx.id);
                     setActiveScreen("P15");
                   }}
                   className="px-2.5 py-1 rounded-lg bg-[#C94C4C] text-white text-[11px] font-semibold shrink-0 cursor-pointer"
@@ -573,25 +591,36 @@ export function CalendarCoreScreens() {
                   Pagar
                 </button>
               </div>
-            )}
+            ))}
 
-            {monthProjection.delayedIncomeCount > 0 && (
-              <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#F1D8CE]">
+            {delayedIncomesList.map((tx, idx) => (
+              <div
+                key={tx.id}
+                className={`flex items-center justify-between gap-2 ${
+                  overdueExpensesList.length > 0 || idx > 0
+                    ? "pt-2 border-t border-[#F1D8CE]"
+                    : ""
+                }`}
+              >
                 <div className="flex items-center gap-2 text-xs">
                   <Clock className="w-4 h-4 text-[#D99A32] shrink-0" />
                   <div>
                     <span className="font-bold text-[#9A6712]">
-                      1 ingreso atrasado (16 Nov):
+                      Ingreso atrasado ({formatShortDateEs(tx.expected_date)}):
                     </span>{" "}
                     <span className="text-[#68736B]">
-                      Freelance diseño (+{formatMXN(3000, { approximate: true })}, no sumado al proyectado)
+                      {tx.title} (+
+                      {formatMXN(getEffectiveAmount(tx), {
+                        approximate: tx.amount_type === "variable",
+                      })}
+                      , no sumado al proyectado)
                     </span>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedTransactionId("tx-inc-02");
+                    setSelectedTransactionId(tx.id);
                     setActiveScreen("P16");
                   }}
                   className="px-2.5 py-1 rounded-lg bg-[#23845B] text-white text-[11px] font-semibold shrink-0 cursor-pointer"
@@ -599,7 +628,7 @@ export function CalendarCoreScreens() {
                   Recibir
                 </button>
               </div>
-            )}
+            ))}
           </div>
         )}
 
@@ -700,7 +729,7 @@ export function CalendarCoreScreens() {
                     )}
                   </div>
 
-                  {/* Marcadores geométricos de prioridad e ingreso (PRD 5.4: máx 3 marcadores + '+N') */}
+                  {/* Marcadores geométricos de prioridad e ingreso (máx 3 marcadores + '+N') */}
                   {dayTxs.length > 0 && (
                     <div className="flex items-center justify-center gap-1 pb-0.5">
                       {hasIncome && (
@@ -755,117 +784,163 @@ export function CalendarCoreScreens() {
           </div>
         </section>
 
-        {/* Lista de Próximos Compromisos y Pendientes del Mes */}
-        <section aria-label="Próximos compromisos" className="space-y-2.5">
-          <div className="flex items-center justify-between">
+        {/* Tarjeta guía cuando no hay movimientos en el mes */}
+        {monthTransactions.length === 0 ? (
+          <section className="bg-[#FFFFFF] rounded-2xl p-5 border border-[#E4E6DE] text-center space-y-3 shadow-xs">
+            <div className="w-11 h-11 rounded-2xl bg-[#F0F1EB] text-[#34483D] flex items-center justify-center mx-auto">
+              <Sparkles className="w-5 h-5" />
+            </div>
             <h2 className="text-sm font-bold text-[#26332D]">
-              Compromisos por resolver ({upcomingCommitments.length})
+              Comienza a planear {formatMonthYearEs(currentYearMonth)}
             </h2>
+            <p className="text-xs text-[#68736B] leading-relaxed">
+              Aún no tienes ingresos ni gastos registrados en este mes. Toca cualquier día del calendario o usa los botones inferiores para registrar tus primeros movimientos.
+            </p>
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setActiveScreen("P12")}
+                className="py-2.5 px-3 rounded-xl bg-[#34483D] text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Registrar gasto</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveScreen("P13")}
+                className="py-2.5 px-3 rounded-xl bg-[#23845B] text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Registrar ingreso</span>
+              </button>
+            </div>
             <button
               type="button"
-              onClick={() => setActiveScreen("P18")}
-              className="text-xs font-semibold text-[#34483D] hover:underline cursor-pointer"
+              onClick={() => setIsTutorialOpen(true)}
+              className="text-xs font-semibold text-[#34483D] underline pt-1 cursor-pointer"
             >
-              Ver historial completo
+              Ver tutorial rápido de cómo funciona la app
             </button>
-          </div>
+          </section>
+        ) : (
+          /* Lista de Próximos Compromisos y Pendientes del Mes */
+          <section aria-label="Próximos compromisos" className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-bold text-[#26332D]">
+                Compromisos por resolver ({upcomingCommitments.length})
+              </h2>
+              <button
+                type="button"
+                onClick={() => setActiveScreen("P18")}
+                className="text-xs font-semibold text-[#34483D] hover:underline cursor-pointer"
+              >
+                Ver historial completo
+              </button>
+            </div>
 
-          <div className="space-y-2">
-            {upcomingCommitments.map((tx) => {
-              const overdue = isExpenseOverdue(tx, referenceDate);
-              const delayed = isIncomeDelayed(tx, referenceDate);
-              const unquantified = isUnquantifiedExpense(tx);
+            {upcomingCommitments.length === 0 ? (
+              <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] text-center text-xs text-[#68736B]">
+                ¡Excelente! No tienes pagos ni cobros pendientes por confirmar en este mes.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {upcomingCommitments.map((tx) => {
+                  const overdue = isExpenseOverdue(tx, referenceDate);
+                  const delayed = isIncomeDelayed(tx, referenceDate);
+                  const unquantified = isUnquantifiedExpense(tx);
 
-              return (
-                <div
-                  key={tx.id}
-                  onClick={() => {
-                    setSelectedTransactionId(tx.id);
-                    setActiveScreen("P14");
-                  }}
-                  className="bg-[#FFFFFF] rounded-2xl p-3.5 border border-[#E4E6DE] hover:border-[#91A68C] transition flex items-center justify-between gap-3 cursor-pointer"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-bold text-[#26332D] truncate">
-                        {tx.title}
-                      </span>
-                      {tx.type === "expense" && (
-                        <PriorityBadge priority={tx.priority} compact />
-                      )}
-                      <StatusBadge
-                        status={tx.status}
-                        isOverdueExpense={overdue}
-                        isDelayedIncome={delayed}
-                        compact
-                      />
-                    </div>
-                    <div className="text-xs text-[#68736B] mt-1 flex items-center gap-2">
-                      <span>{formatShortDateEs(tx.expected_date)}</span>
-                      <span>•</span>
-                      <span>{getCategoryName(tx.category_id)}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-1.5 shrink-0">
-                    <span
-                      className={`text-sm font-bold tabular-nums ${
-                        unquantified
-                          ? "text-[#9A6712]"
-                          : tx.type === "income"
-                          ? "text-[#23845B]"
-                          : overdue
-                          ? "text-[#C94C4C]"
-                          : "text-[#26332D]"
-                      }`}
-                    >
-                      {unquantified
-                        ? "Monto por definir"
-                        : formatMXN(getEffectiveAmount(tx), {
-                            showPrefix: false,
-                            showPlusSign: tx.type === "income",
-                            showMinusSign: tx.type === "expense",
-                            approximate: tx.amount_type === "variable",
-                          })}
-                    </span>
-
+                  return (
                     <div
-                      className="flex items-center gap-1.5"
-                      onClick={(e) => e.stopPropagation()}
+                      key={tx.id}
+                      onClick={() => {
+                        setSelectedTransactionId(tx.id);
+                        setActiveScreen("P14");
+                      }}
+                      className="bg-[#FFFFFF] rounded-2xl p-3.5 border border-[#E4E6DE] hover:border-[#91A68C] transition flex items-center justify-between gap-3 cursor-pointer"
                     >
-                      {tx.type === "expense" ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedTransactionId(tx.id);
-                            setActiveScreen("P15");
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-[#34483D] hover:bg-[#26332D] text-white text-[11px] font-semibold cursor-pointer"
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold text-[#26332D] truncate">
+                            {tx.title}
+                          </span>
+                          {tx.type === "expense" && (
+                            <PriorityBadge priority={tx.priority} compact />
+                          )}
+                          <StatusBadge
+                            status={tx.status}
+                            isOverdueExpense={overdue}
+                            isDelayedIncome={delayed}
+                            compact
+                          />
+                        </div>
+                        <div className="text-xs text-[#68736B] mt-1 flex items-center gap-2">
+                          <span>{formatShortDateEs(tx.expected_date)}</span>
+                          <span>•</span>
+                          <span>{getCategoryName(tx.category_id)}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col items-end gap-1.5 shrink-0">
+                        <span
+                          className={`text-sm font-bold tabular-nums ${
+                            unquantified
+                              ? "text-[#9A6712]"
+                              : tx.type === "income"
+                              ? "text-[#23845B]"
+                              : overdue
+                              ? "text-[#C94C4C]"
+                              : "text-[#26332D]"
+                          }`}
                         >
-                          Confirmar pago
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedTransactionId(tx.id);
-                            setActiveScreen("P16");
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-[#23845B] hover:bg-[#1D6E4B] text-white text-[11px] font-semibold cursor-pointer"
+                          {unquantified
+                            ? "Monto por definir"
+                            : formatMXN(getEffectiveAmount(tx), {
+                                showPrefix: false,
+                                showPlusSign: tx.type === "income",
+                                showMinusSign: tx.type === "expense",
+                                approximate: tx.amount_type === "variable",
+                              })}
+                        </span>
+
+                        <div
+                          className="flex items-center gap-1.5"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          Confirmar cobro
-                        </button>
-                      )}
+                          {tx.type === "expense" ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedTransactionId(tx.id);
+                                setActiveScreen("P15");
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-[#34483D] hover:bg-[#26332D] text-white text-[11px] font-semibold cursor-pointer"
+                            >
+                              Confirmar pago
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedTransactionId(tx.id);
+                                setActiveScreen("P16");
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-[#23845B] hover:bg-[#1D6E4B] text-white text-[11px] font-semibold cursor-pointer"
+                            >
+                              Confirmar cobro
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
       </div>
 
-      {/* P11: Bottom Sheet de Detalle del Día */}
+      {/* Bottom Sheet de Detalle del Día */}
       {activeScreen === "P11" && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center">
           <div className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl p-5 border-t border-[#E4E6DE] shadow-2xl max-h-[82vh] flex flex-col">
@@ -991,7 +1066,7 @@ export function CalendarCoreScreens() {
                           }}
                           className="flex-1 py-2 px-3 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#26332D] text-xs font-semibold cursor-pointer"
                         >
-                          Ver detalle (P14)
+                          Ver detalle
                         </button>
                       </div>
                     </div>
