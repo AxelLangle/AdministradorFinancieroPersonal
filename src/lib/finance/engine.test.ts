@@ -7,8 +7,11 @@ import {
   calculateCurrentBalance,
   calculateMonthProjection,
   calculateNextIncomeStretch,
+  explainFinancialProjection,
   filterTransactions,
+  generateOccurrencesForRuleInMonth,
   isDateBeforeOpeningBalance,
+  serializeRecurrenceSchedule,
 } from "./engine.ts";
 import {
   P32_UNQUANTIFIED_TRANSACTIONS,
@@ -228,5 +231,113 @@ describe("Motor de Cálculo Financiero (PRD v1.1.2 - Dataset Maestro Sofía)", (
     };
     assert.equal(appearsOnCalendarDate(cancelledTx, "2026-11-14"), false);
     assert.equal(appearsOnCalendarDate(cancelledTx, "2026-11-20"), false);
+  });
+
+  it("10. Genera catorcenas alternadas (catorcena grande $9,500 y pequeña $8,500) cada 14 días", () => {
+    const semimonthlySpec = serializeRecurrenceSchedule({
+      alternateAmount: 8500,
+      weekendShift: "none",
+    });
+    const biweeklyRule = {
+      ...SOFIA_RECURRENCE_RULES[0],
+      id: "rule-catorcena-alt",
+      type: "income" as const,
+      title: "Nómina Catorcenal",
+      default_amount: 9500,
+      frequency: "biweekly" as const,
+      start_date: "2026-11-06",
+      semimonthly_days: semimonthlySpec,
+      status: "active" as const,
+    };
+
+    const novOccurrences = generateOccurrencesForRuleInMonth({
+      rule: biweeklyRule,
+      yearMonth: "2026-11",
+      referenceDate: "2026-11-01",
+    });
+
+    assert.equal(novOccurrences.length, 2);
+    assert.equal(novOccurrences[0].expected_date, "2026-11-06");
+    assert.equal(novOccurrences[0].estimated_amount, 9500);
+    assert.equal(novOccurrences[1].expected_date, "2026-11-20");
+    assert.equal(novOccurrences[1].estimated_amount, 8500);
+  });
+
+  it("11. Genera múltiples días seleccionados en el calendario con montos personalizados y ajuste de fin de semana a viernes", () => {
+    const multiSpec = serializeRecurrenceSchedule({
+      items: [
+        { day: 5, amount: 4000 },
+        { day: 15, amount: 9500 },
+        { day: "last", amount: 8500 },
+      ],
+      weekendShift: "friday",
+    });
+
+    const multiRule = {
+      ...SOFIA_RECURRENCE_RULES[0],
+      id: "rule-multi-cal",
+      type: "income" as const,
+      title: "Cobros Calendario",
+      default_amount: 9500,
+      frequency: "monthly" as const,
+      start_date: "2026-11-01",
+      semimonthly_days: multiSpec,
+      status: "active" as const,
+    };
+
+    // En Noviembre 2026: día 15 es domingo -> se recorre al viernes 13/11/2026
+    const novOccurrences = generateOccurrencesForRuleInMonth({
+      rule: multiRule,
+      yearMonth: "2026-11",
+      referenceDate: "2026-11-01",
+    });
+
+    assert.equal(novOccurrences.length, 3);
+    assert.equal(novOccurrences[0].expected_date, "2026-11-05");
+    assert.equal(novOccurrences[0].estimated_amount, 4000);
+    assert.equal(novOccurrences[1].occurrence_date, "2026-11-15");
+    assert.equal(novOccurrences[1].expected_date, "2026-11-13");
+    assert.equal(novOccurrences[1].estimated_amount, 9500);
+    assert.equal(novOccurrences[2].expected_date, "2026-11-30");
+    assert.equal(novOccurrences[2].estimated_amount, 8500);
+  });
+
+  it("12. Genera explicación detallada de proyección y consejos personalizados según el estado financiero", () => {
+    const projection = calculateMonthProjection({
+      yearMonth: "2026-11",
+      referenceDate: SOFIA_REFERENCE_DATE,
+      account: SOFIA_ACCOUNT,
+      transactions: SOFIA_TRANSACTIONS,
+      budget: SOFIA_BUDGET,
+    });
+    const budgetSummary = calculateBudgetSummary({
+      yearMonth: "2026-11",
+      referenceDate: SOFIA_REFERENCE_DATE,
+      account: SOFIA_ACCOUNT,
+      transactions: SOFIA_TRANSACTIONS,
+      budget: SOFIA_BUDGET,
+    });
+    const nextStretch = calculateNextIncomeStretch({
+      yearMonth: "2026-11",
+      referenceDate: SOFIA_REFERENCE_DATE,
+      account: SOFIA_ACCOUNT,
+      transactions: SOFIA_TRANSACTIONS,
+      budget: SOFIA_BUDGET,
+    });
+
+    const explanation = explainFinancialProjection({
+      monthProjection: projection,
+      budgetSummary,
+      nextIncomeStretch: nextStretch,
+      transactions: SOFIA_TRANSACTIONS,
+      referenceDate: SOFIA_REFERENCE_DATE,
+    });
+
+    assert.equal(explanation.statusColor, "green");
+    assert.equal(explanation.formula.startingAmount, 6480.5);
+    assert.equal(explanation.formula.scheduledIncomesAmount, 9000);
+    assert.equal(explanation.formula.pendingExpensesAmount, 3280);
+    assert.equal(explanation.formula.projectedClosingAmount, 12200.5);
+    assert.equal(explanation.tips.length >= 2, true);
   });
 });
