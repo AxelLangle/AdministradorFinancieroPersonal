@@ -4,6 +4,7 @@ import type {
   BudgetSummary,
   CustomScheduleDayItem,
   DailyProjectionPoint,
+  ExcludedDayShift,
   FinancialInsightTip,
   FinancialProjectionExplanation,
   MonthProjectionSummary,
@@ -245,6 +246,11 @@ export function affectsCurrentBalance(
   if (tx.status !== "paid" && tx.status !== "received") {
     return false;
   }
+  // Si settled_at es null, se trata de un movimiento histórico o anterior a hoy
+  // que ya está reflejado en el saldo actual de la cuenta.
+  if (!tx.settled_at) {
+    return false;
+  }
   const settledDate = (tx.settled_date || tx.expected_date).slice(0, 10);
   const openingDate = account.opening_balance_date.slice(0, 10);
 
@@ -255,7 +261,7 @@ export function affectsCurrentBalance(
     return false;
   }
 
-  if (!tx.settled_at || !account.opening_balance_at) {
+  if (!account.opening_balance_at) {
     return false;
   }
   return (
@@ -269,6 +275,18 @@ export function isDateBeforeOpeningBalance(
   account: Account
 ): boolean {
   return dateStr.slice(0, 10) < account.opening_balance_date.slice(0, 10);
+}
+
+export function isPriorToTodayOrCutoff(
+  dateStr: string,
+  account: Account,
+  referenceDate: string
+): boolean {
+  const cleanDate = dateStr.slice(0, 10);
+  return (
+    cleanDate < referenceDate.slice(0, 10) ||
+    isDateBeforeOpeningBalance(cleanDate, account)
+  );
 }
 
 export function calculateCurrentBalance(
@@ -793,7 +811,11 @@ export function applyRecurrenceEditScope(params: {
       Transaction,
       | "title"
       | "estimated_amount"
+      | "actual_amount"
       | "expected_date"
+      | "settled_date"
+      | "settled_at"
+      | "status"
       | "priority"
       | "category_id"
       | "amount_type"
@@ -815,6 +837,12 @@ export function applyRecurrenceEditScope(params: {
     targetTx.occurrence_date || targetTx.expected_date
   ).slice(0, 10);
   const nowIso = new Date().toISOString();
+
+  const batchUpdates = { ...updates };
+  delete batchUpdates.status;
+  delete batchUpdates.settled_date;
+  delete batchUpdates.settled_at;
+  delete batchUpdates.actual_amount;
 
   const updatedTransactions = transactions.map((tx) => {
     const isSettled = tx.status === "paid" || tx.status === "received";
@@ -852,7 +880,7 @@ export function applyRecurrenceEditScope(params: {
 
       return {
         ...tx,
-        ...updates,
+        ...batchUpdates,
         expected_date: newExpectedDate,
         updated_at: nowIso,
       };
@@ -861,7 +889,7 @@ export function applyRecurrenceEditScope(params: {
     if (scope === "all_pending") {
       return {
         ...tx,
-        ...updates,
+        ...batchUpdates,
         expected_date:
           tx.id === targetTransactionId && updates.expected_date
             ? updates.expected_date
@@ -889,6 +917,7 @@ export function applyRecurrenceEditScope(params: {
           ? updates.category_id
           : rule.category_id,
       amount_type: updates.amount_type ?? rule.amount_type,
+      notes: updates.notes !== undefined ? updates.notes : rule.notes,
       day_of_month: updates.expected_date
         ? Number(updates.expected_date.slice(8, 10))
         : rule.day_of_month,
@@ -911,14 +940,20 @@ const WEEKDAY_NAMES_ES = [
   "Sábado",
 ];
 
+const WEEKDAY_SHORT_ES = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+
 /**
- * Serializa días personalizados, montos alternados (ej. catorcena grande y pequeña)
- * y ajuste de fin de semana dentro del campo `semimonthly_days` compatible con Supabase.
+ * Serializa días personalizados, montos alternados (ej. catorcena grande y pequeña),
+ * ajuste de fin de semana y días excluidos (que no caigan en días específicos)
+ * dentro del campo `semimonthly_days` compatible con Supabase.
  */
 export function serializeRecurrenceSchedule(params: {
   items?: CustomScheduleDayItem[];
   alternateAmount?: number | null;
   weekendShift?: "none" | "friday";
+  excludedWeekdays?: number[];
+  excludedMonthDays?: number[];
+  excludedShift?: ExcludedDayShift;
 }): string | null {
   const parts: string[] = [];
 
@@ -945,12 +980,62 @@ export function serializeRecurrenceSchedule(params: {
     parts.push(dayTokens.join(","));
   }
 
-  let base = parts.join("|");
-  if (params.weekendShift === "friday") {
-    base = base ? `${base};weekend=friday` : "weekend=friday";
+  const flags: string[] = [];
+  const normExDow = Array.from(
+    new Set(
+      (params.excludedWeekdays || []).filter(
+        (d) => Number.isInteger(d) && d >= 0 && d <= 6
+      )
+    )
+  ).sort((a, b) => a - b);
+
+  const normExDom = Array.from(
+    new Set(
+      (params.excludedMonthDays || []).filter(
+        (d) => Number.isInteger(d) && d >= 1 && d <= 31
+      )
+    )
+  ).sort((a, b) => a - b);
+
+  const effectiveShift: ExcludedDayShift =
+    params.excludedShift && params.excludedShift !== "none"
+      ? params.excludedShift
+      : params.weekendShift === "friday"
+      ? "prev"
+      : normExDow.length > 0 || normExDom.length > 0
+      ? "next"
+      : "none";
+
+  const isPureWeekendPrev =
+    (params.weekendShift === "friday" &&
+      normExDow.length === 0 &&
+      normExDom.length === 0) ||
+    (normExDow.length === 2 &&
+      normExDow[0] === 0 &&
+      normExDow[1] === 6 &&
+      normExDom.length === 0 &&
+      effectiveShift === "prev");
+
+  if (isPureWeekendPrev) {
+    flags.push("weekend=friday");
+  } else {
+    if (normExDow.length > 0) {
+      flags.push(`exdow=${normExDow.join(",")}`);
+    }
+    if (normExDom.length > 0) {
+      flags.push(`exdom=${normExDom.join(",")}`);
+    }
+    if (
+      (normExDow.length > 0 || normExDom.length > 0) &&
+      effectiveShift !== "none"
+    ) {
+      flags.push(`shift=${effectiveShift}`);
+    }
   }
 
-  return base || null;
+  const mainStr = parts.join("|");
+  const allTokens = [mainStr, ...flags].filter(Boolean);
+  return allTokens.join(";") || null;
 }
 
 /**
@@ -967,21 +1052,63 @@ export function parseRecurrenceSchedule(
   >
 ): ParsedRecurrenceSchedule {
   let weekendShift: "none" | "friday" = "none";
+  let excludedWeekdays: number[] = [];
+  let excludedMonthDays: number[] = [];
+  let excludedShift: ExcludedDayShift = "none";
   let alternateAmount: number | null = null;
   const items: CustomScheduleDayItem[] = [];
 
   const raw = (rule.semimonthly_days || "").trim();
   if (raw) {
-    const [mainPart, ...flagParts] = raw.split(";");
-    for (const flag of flagParts) {
-      if (flag.trim() === "weekend=friday") {
+    const segments = raw
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const scheduleParts: string[] = [];
+
+    for (const seg of segments) {
+      if (seg === "weekend=friday") {
         weekendShift = "friday";
+        if (excludedWeekdays.length === 0) {
+          excludedWeekdays = [0, 6];
+        }
+        if (excludedShift === "none") {
+          excludedShift = "prev";
+        }
+      } else if (seg.startsWith("exdow=")) {
+        const parsedDows = seg
+          .slice(6)
+          .split(",")
+          .map((n) => Number(n.trim()))
+          .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+        excludedWeekdays = Array.from(new Set(parsedDows)).sort((a, b) => a - b);
+      } else if (seg.startsWith("exdom=")) {
+        const parsedDoms = seg
+          .slice(6)
+          .split(",")
+          .map((n) => Number(n.trim()))
+          .filter((d) => Number.isInteger(d) && d >= 1 && d <= 31);
+        excludedMonthDays = Array.from(new Set(parsedDoms)).sort(
+          (a, b) => a - b
+        );
+      } else if (seg.startsWith("shift=")) {
+        const val = seg.slice(6).trim();
+        if (val === "prev" || val === "next" || val === "none") {
+          excludedShift = val;
+        }
+      } else {
+        scheduleParts.push(seg);
       }
     }
 
-    if (mainPart.trim() === "weekend=friday") {
-      weekendShift = "friday";
-    } else if (mainPart.trim()) {
+    if (
+      (excludedWeekdays.length > 0 || excludedMonthDays.length > 0) &&
+      excludedShift === "none"
+    ) {
+      excludedShift = "next";
+    }
+
+    for (const mainPart of scheduleParts) {
       const sections = mainPart.split("|");
       for (const sec of sections) {
         const trimmed = sec.trim();
@@ -1022,6 +1149,9 @@ export function parseRecurrenceSchedule(
       items,
       alternateAmount,
       weekendShift,
+      excludedWeekdays,
+      excludedMonthDays,
+      excludedShift,
     };
   }
 
@@ -1031,17 +1161,25 @@ export function parseRecurrenceSchedule(
       items,
       alternateAmount,
       weekendShift,
+      excludedWeekdays,
+      excludedMonthDays,
+      excludedShift,
     };
   }
 
   if (rule.frequency === "semimonthly") {
     const effectiveItems =
-      items.length > 0 ? items : [{ day: 15 as const }, { day: "last" as const }];
+      items.length > 0
+        ? items
+        : [{ day: 15 as const }, { day: "last" as const }];
     return {
       mode: effectiveItems.length > 2 ? "multi_day" : "semimonthly",
       items: effectiveItems,
       alternateAmount,
       weekendShift,
+      excludedWeekdays,
+      excludedMonthDays,
+      excludedShift,
     };
   }
 
@@ -1051,6 +1189,9 @@ export function parseRecurrenceSchedule(
       items,
       alternateAmount,
       weekendShift,
+      excludedWeekdays,
+      excludedMonthDays,
+      excludedShift,
     };
   }
 
@@ -1062,7 +1203,66 @@ export function parseRecurrenceSchedule(
     items: [singleDay],
     alternateAmount,
     weekendShift,
+    excludedWeekdays,
+    excludedMonthDays,
+    excludedShift,
   };
+}
+
+function formatUtcDateISO(dt: Date): string {
+  const y = dt.getUTCFullYear();
+  const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(dt.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Ajusta una fecha YYYY-MM-DD para que no caiga en días de la semana ni días del mes excluidos,
+ * moviéndola al día válido anterior ("prev") o siguiente ("next") de forma segura en UTC.
+ */
+export function adjustDateForExclusions(
+  dateStr: string,
+  schedule: Pick<
+    ParsedRecurrenceSchedule,
+    "weekendShift" | "excludedWeekdays" | "excludedMonthDays" | "excludedShift"
+  >
+): string {
+  const clean = dateStr.slice(0, 10);
+  const [y, m, d] = clean.split("-").map(Number);
+  if (!y || !m || !d) return clean;
+
+  const exDows =
+    schedule.excludedWeekdays.length > 0
+      ? schedule.excludedWeekdays
+      : schedule.weekendShift === "friday"
+      ? [0, 6]
+      : [];
+  const exDoms = schedule.excludedMonthDays || [];
+  const shift: ExcludedDayShift =
+    schedule.excludedShift && schedule.excludedShift !== "none"
+      ? schedule.excludedShift
+      : schedule.weekendShift === "friday"
+      ? "prev"
+      : "none";
+
+  if ((exDows.length === 0 && exDoms.length === 0) || shift === "none") {
+    return clean;
+  }
+
+  const stepDelta = shift === "prev" ? -1 : 1;
+  const cursor = new Date(Date.UTC(y, m - 1, d));
+
+  for (let i = 0; i < 31; i++) {
+    const dow = cursor.getUTCDay();
+    const dom = cursor.getUTCDate();
+    const isExcluded = exDows.includes(dow) || exDoms.includes(dom);
+    if (!isExcluded) {
+      return formatUtcDateISO(cursor);
+    }
+    cursor.setUTCDate(cursor.getUTCDate() + stepDelta);
+  }
+
+  return clean;
 }
 
 export function adjustDateForWeekend(
@@ -1070,19 +1270,37 @@ export function adjustDateForWeekend(
   weekendShift: "none" | "friday"
 ): string {
   if (weekendShift !== "friday") return dateStr.slice(0, 10);
-  const [y, m, d] = dateStr.slice(0, 10).split("-").map(Number);
-  if (!y || !m || !d) return dateStr.slice(0, 10);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  const dow = dt.getUTCDay();
-  if (dow === 6 && d > 1) {
-    // Sábado -> Viernes anterior
-    return `${y}-${String(m).padStart(2, "0")}-${String(d - 1).padStart(2, "0")}`;
+  return adjustDateForExclusions(dateStr, {
+    weekendShift: "friday",
+    excludedWeekdays: [0, 6],
+    excludedMonthDays: [],
+    excludedShift: "prev",
+  });
+}
+
+function formatExclusionsSummaryEs(parsed: ParsedRecurrenceSchedule): string {
+  const hasExDows = parsed.excludedWeekdays.length > 0;
+  const hasExDoms = parsed.excludedMonthDays.length > 0;
+  if (!hasExDows && !hasExDoms) {
+    return parsed.weekendShift === "friday" ? " • Fin de semana → Viernes" : "";
   }
-  if (dow === 0 && d > 2) {
-    // Domingo -> Viernes anterior
-    return `${y}-${String(m).padStart(2, "0")}-${String(d - 2).padStart(2, "0")}`;
+  const shiftTxt = parsed.excludedShift === "prev" ? "día ant." : "sig. válido";
+  const parts: string[] = [];
+  if (
+    parsed.excludedWeekdays.length === 2 &&
+    parsed.excludedWeekdays[0] === 0 &&
+    parsed.excludedWeekdays[1] === 6
+  ) {
+    parts.push("fin de semana");
+  } else if (hasExDows) {
+    parts.push(
+      parsed.excludedWeekdays.map((d) => WEEKDAY_SHORT_ES[d] || d).join(", ")
+    );
   }
-  return dateStr.slice(0, 10);
+  if (hasExDoms) {
+    parts.push(`días ${parsed.excludedMonthDays.join(", ")}`);
+  }
+  return ` • Evita ${parts.join(" y ")} (→ ${shiftTxt})`;
 }
 
 /**
@@ -1090,8 +1308,7 @@ export function adjustDateForWeekend(
  */
 export function describeRecurrenceRuleSchedule(rule: RecurrenceRule): string {
   const parsed = parseRecurrenceSchedule(rule);
-  const weekendNote =
-    parsed.weekendShift === "friday" ? " • Fin de semana → Viernes" : "";
+  const exclusionsNote = formatExclusionsSummaryEs(parsed);
 
   if (rule.frequency === "biweekly") {
     if (parsed.alternateAmount && parsed.alternateAmount > 0) {
@@ -1100,11 +1317,11 @@ export function describeRecurrenceRuleSchedule(rule: RecurrenceRule): string {
         { showPrefix: false }
       )} y ${formatMXN(parsed.alternateAmount, {
         showPrefix: false,
-      })}${weekendNote}`;
+      })}${exclusionsNote}`;
     }
     return `Catorcenal (cada 14 días desde ${formatShortDateEs(
       rule.start_date
-    )})${weekendNote}`;
+    )})${exclusionsNote}`;
   }
 
   if (rule.frequency === "weekly") {
@@ -1117,9 +1334,11 @@ export function describeRecurrenceRuleSchedule(rule: RecurrenceRule): string {
       return `Semanal (cada ${dayName}) • Alterna ${formatMXN(
         rule.default_amount,
         { showPrefix: false }
-      )} y ${formatMXN(parsed.alternateAmount, { showPrefix: false })}`;
+      )} y ${formatMXN(parsed.alternateAmount, {
+        showPrefix: false,
+      })}${exclusionsNote}`;
     }
-    return `Semanal (cada ${dayName})`;
+    return `Semanal (cada ${dayName})${exclusionsNote}`;
   }
 
   if (parsed.mode === "semimonthly" || parsed.mode === "multi_day") {
@@ -1134,7 +1353,9 @@ export function describeRecurrenceRuleSchedule(rule: RecurrenceRule): string {
         it.amount !== rule.default_amount
     );
     const prefix =
-      parsed.items.length === 2 ? "Quincenal" : `Calendario (${parsed.items.length} fechas/mes)`;
+      parsed.items.length === 2
+        ? "Quincenal"
+        : `Calendario (${parsed.items.length} fechas/mes)`;
     if (hasCustomAmounts) {
       const amountPairs = parsed.items
         .map((it) => {
@@ -1143,9 +1364,9 @@ export function describeRecurrenceRuleSchedule(rule: RecurrenceRule): string {
           return `día ${dLabel}: ${formatMXN(amt, { showPrefix: false })}`;
         })
         .join(" / ");
-      return `${prefix} (${amountPairs})${weekendNote}`;
+      return `${prefix} (${amountPairs})${exclusionsNote}`;
     }
-    return `${prefix} (${dayLabels.join(", ")})${weekendNote}`;
+    return `${prefix} (${dayLabels.join(", ")})${exclusionsNote}`;
   }
 
   const freqMap: Record<string, string> = {
@@ -1161,7 +1382,7 @@ export function describeRecurrenceRuleSchedule(rule: RecurrenceRule): string {
     singleItem?.day === "last" || rule.day_of_month === 31
       ? "último día del mes"
       : `día ${singleItem?.day || rule.day_of_month || 1}`;
-  return `${fLabel} (${dayText})${weekendNote}`;
+  return `${fLabel} (${dayText})${exclusionsNote}`;
 }
 
 /**
@@ -1173,13 +1394,14 @@ export function generateOccurrencesForRuleInMonth(params: {
   rule: RecurrenceRule;
   yearMonth: string;
   referenceDate: string;
+  openingBalanceDate?: string;
 }): Array<
   Omit<
     Transaction,
     "id" | "workspace_id" | "account_id" | "created_at" | "updated_at"
   >
 > {
-  const { rule, yearMonth, referenceDate } = params;
+  const { rule, yearMonth, referenceDate, openingBalanceDate } = params;
   if (rule.status !== "active") return [];
 
   const { startDate, endDate, year, month, daysInMonth } =
@@ -1189,6 +1411,7 @@ export function generateOccurrencesForRuleInMonth(params: {
     return [];
   }
 
+  const cutoffDate = openingBalanceDate ? openingBalanceDate.slice(0, 10) : null;
   const parsed = parseRecurrenceSchedule(rule);
   const results: Array<
     Omit<
@@ -1205,28 +1428,39 @@ export function generateOccurrencesForRuleInMonth(params: {
   ): Omit<
     Transaction,
     "id" | "workspace_id" | "account_id" | "created_at" | "updated_at"
-  > => ({
-    type: rule.type,
-    title: titleSuffix ? `${rule.title} ${titleSuffix}` : rule.title,
-    category_id: rule.category_id,
-    priority: rule.priority,
-    status:
-      rule.type === "income"
+  > => {
+    const isPriorToOpeningCutoff = Boolean(
+      cutoffDate && expectedDate < cutoffDate
+    );
+
+    return {
+      type: rule.type,
+      title: titleSuffix ? `${rule.title} ${titleSuffix}` : rule.title,
+      category_id: rule.category_id,
+      priority: rule.priority,
+      status: isPriorToOpeningCutoff
+        ? rule.type === "income"
+          ? "received"
+          : "paid"
+        : rule.type === "income"
         ? "scheduled"
         : expectedDate < referenceDate
         ? "overdue"
         : "pending",
-    amount_type: rule.amount_type,
-    estimated_amount: amount,
-    actual_amount: null,
-    expected_date: expectedDate,
-    settled_date: null,
-    settled_at: null,
-    recurrence_rule_id: rule.id,
-    occurrence_date: occurrenceDate,
-    is_exception: false,
-    notes: rule.notes,
-  });
+      amount_type: rule.amount_type,
+      estimated_amount: amount,
+      actual_amount: isPriorToOpeningCutoff ? amount : null,
+      expected_date: expectedDate,
+      settled_date: isPriorToOpeningCutoff ? expectedDate : null,
+      settled_at: isPriorToOpeningCutoff
+        ? `${expectedDate}T12:00:00.000Z`
+        : null,
+      recurrence_rule_id: rule.id,
+      occurrence_date: occurrenceDate,
+      is_exception: false,
+      notes: rule.notes,
+    };
+  };
 
   if (rule.frequency === "biweekly" || rule.frequency === "weekly") {
     const stepDays = rule.frequency === "biweekly" ? 14 : 7;
@@ -1236,12 +1470,18 @@ export function generateOccurrencesForRuleInMonth(params: {
     for (let d = 1; d <= daysInMonth; d++) {
       const dd = String(d).padStart(2, "0");
       const dateStr = `${year}-${mm}-${dd}`;
+      if (dateStr < ruleStart) continue;
       if (rule.end_date && dateStr > rule.end_date.slice(0, 10)) continue;
 
       const curTime = new Date(`${dateStr}T00:00:00Z`).getTime();
       const diffDays = Math.round((curTime - anchorTime) / 86400000);
+      if (diffDays < 0) continue;
 
-      if (rule.frequency === "weekly" && rule.day_of_week !== null && rule.day_of_week !== undefined) {
+      if (
+        rule.frequency === "weekly" &&
+        rule.day_of_week !== null &&
+        rule.day_of_week !== undefined
+      ) {
         const dow = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
         if (dow !== rule.day_of_week) continue;
         const weekIndex = Math.max(0, Math.floor(diffDays / 7));
@@ -1251,16 +1491,16 @@ export function generateOccurrencesForRuleInMonth(params: {
           hasAlt && weekIndex % 2 === 1
             ? parsed.alternateAmount
             : rule.default_amount;
-        const expDate = adjustDateForWeekend(dateStr, parsed.weekendShift);
+        const expDate = adjustDateForExclusions(dateStr, parsed);
         results.push(buildTx(dateStr, expDate, amt));
-      } else if (diffDays % stepDays === 0 && diffDays >= -stepDays) {
-        const cycleIdx = Math.abs(Math.round(diffDays / stepDays));
+      } else if (diffDays % stepDays === 0) {
+        const cycleIdx = Math.round(diffDays / stepDays);
         const hasAlt =
           parsed.alternateAmount !== null && parsed.alternateAmount > 0;
         const isSecond = cycleIdx % 2 === 1;
         const amt =
           hasAlt && isSecond ? parsed.alternateAmount : rule.default_amount;
-        const expDate = adjustDateForWeekend(dateStr, parsed.weekendShift);
+        const expDate = adjustDateForExclusions(dateStr, parsed);
         const suffix =
           rule.frequency === "biweekly" && hasAlt
             ? isSecond
@@ -1273,7 +1513,7 @@ export function generateOccurrencesForRuleInMonth(params: {
     return results;
   }
 
-  // Verificar intervalo de meses para bimestral, trimestral, semestral, anual
+  // Verificar intervalo de meses para mensual, bimestral, trimestral, semestral, anual
   const [startYear, startMonth] = ruleStart.slice(0, 7).split("-").map(Number);
   const monthsDiff = (year - startYear) * 12 + (month - startMonth);
   const monthStep =
@@ -1287,7 +1527,7 @@ export function generateOccurrencesForRuleInMonth(params: {
       ? 12
       : 1;
 
-  if (monthStep > 1 && (monthsDiff < 0 || monthsDiff % monthStep !== 0)) {
+  if (monthsDiff < 0 || (monthStep > 1 && monthsDiff % monthStep !== 0)) {
     return [];
   }
 
@@ -1304,12 +1544,10 @@ export function generateOccurrencesForRuleInMonth(params: {
 
     const dd = String(rawDay).padStart(2, "0");
     const occurrenceDate = `${year}-${mm}-${dd}`;
+    if (parsed.items.length === 1 && occurrenceDate < ruleStart) return;
     if (rule.end_date && occurrenceDate > rule.end_date.slice(0, 10)) return;
 
-    const expectedDate = adjustDateForWeekend(
-      occurrenceDate,
-      parsed.weekendShift
-    );
+    const expectedDate = adjustDateForExclusions(occurrenceDate, parsed);
     const amount =
       item.amount !== undefined && item.amount !== null && item.amount > 0
         ? item.amount
