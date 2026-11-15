@@ -68,7 +68,10 @@ export function CalendarCoreScreens() {
     setIsTutorialOpen,
   } = useFinanceStore();
 
-  const [isSummaryCollapsed, setIsSummaryCollapsed] = useState(false);
+  const [isSummaryManuallyCollapsed, setIsSummaryManuallyCollapsed] =
+    useState(false);
+  const [isScrolledPastSummary, setIsScrolledPastSummary] = useState(false);
+  const isCalendarMainView = activeScreen === "P10" || activeScreen === "P11";
 
   const calendarSwipeHandlers = useHorizontalSwipe({
     enabled: activeScreen === "P10",
@@ -83,18 +86,38 @@ export function CalendarCoreScreens() {
     onClose: () => setActiveScreen("P10"),
   });
 
-  // Colapso automático de la tarjeta de resumen al hacer scroll hacia abajo
+  // Muestra la franja compacta flotante al hacer scroll hacia abajo sin desmontar la tarjeta principal (evita saltos de scroll)
   useEffect(() => {
+    if (!isCalendarMainView) {
+      setIsScrolledPastSummary(false);
+      return;
+    }
+
+    let rafId: number | null = null;
+    const updateScrollState = () => {
+      rafId = null;
+      const y = window.scrollY;
+      setIsScrolledPastSummary((prev) => {
+        if (y > 260) return true;
+        if (y < 180) return false;
+        return prev;
+      });
+    };
+
     const handleScroll = () => {
-      if (window.scrollY > 150) {
-        setIsSummaryCollapsed(true);
-      } else if (window.scrollY < 40) {
-        setIsSummaryCollapsed(false);
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(updateScrollState);
+    };
+
+    updateScrollState();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
       }
     };
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [isCalendarMainView]);
 
   const unreadCount = notifications.filter((n) => !n.read_at).length;
   const { year, month, daysInMonth, startDate, endDate } =
@@ -335,6 +358,41 @@ export function CalendarCoreScreens() {
           label: "Riesgo de déficit",
         };
 
+  const showFloatingSummaryStrip =
+    !isSummaryManuallyCollapsed && isScrolledPastSummary;
+
+  const compactSummaryStrip = (
+    <div className="py-2 px-3 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] flex items-center justify-between shadow-xs">
+      <div className="flex items-center gap-3">
+        <div>
+          <span className="text-[10px] text-[#68736B] block">Saldo actual</span>
+          <span className="text-xs font-bold tabular-nums text-[#26332D]">
+            {formatMXN(monthProjection.currentBalance)}
+          </span>
+        </div>
+        <div className="h-6 w-[1px] bg-[#E4E6DE]" />
+        <div>
+          <span className="text-[10px] text-[#68736B] block">
+            Proyectado fin de mes
+          </span>
+          <span className="text-xs font-bold tabular-nums text-[#23845B]">
+            {monthProjection.projectedClosingBalance !== null
+              ? formatMXN(monthProjection.projectedClosingBalance, {
+                  approximate: monthProjection.hasUnquantifiedPendingExpenses,
+                })
+              : "No disponible"}
+          </span>
+        </div>
+      </div>
+      <span
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${trafficBadge.bg} ${trafficBadge.text}`}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full ${trafficBadge.dot}`} />
+        {trafficBadge.label}
+      </span>
+    </div>
+  );
+
   return (
     <div className="flex-1 flex flex-col">
       {/* Cabecera de Mes y Avisos */}
@@ -370,11 +428,16 @@ export function CalendarCoreScreens() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setIsSummaryCollapsed((prev) => !prev)}
+              onClick={() => setIsSummaryManuallyCollapsed((prev) => !prev)}
               title="Compactar / Expandir resumen"
+              aria-label={
+                isSummaryManuallyCollapsed
+                  ? "Expandir resumen financiero"
+                  : "Compactar resumen financiero"
+              }
               className="p-2 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#68736B] hover:text-[#26332D] cursor-pointer"
             >
-              {isSummaryCollapsed ? (
+              {isSummaryManuallyCollapsed ? (
                 <ChevronDown className="w-4 h-4" />
               ) : (
                 <ChevronUp className="w-4 h-4" />
@@ -397,46 +460,20 @@ export function CalendarCoreScreens() {
           </div>
         </div>
 
-        {/* Franja persistente compacta cuando el usuario hace scroll o compacta */}
-        {isSummaryCollapsed && (
-          <div className="mt-2 py-2 px-3 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] flex items-center justify-between shadow-xs">
-            <div className="flex items-center gap-3">
-              <div>
-                <span className="text-[10px] text-[#68736B] block">
-                  Saldo actual
-                </span>
-                <span className="text-xs font-bold tabular-nums text-[#26332D]">
-                  {formatMXN(monthProjection.currentBalance)}
-                </span>
-              </div>
-              <div className="h-6 w-[1px] bg-[#E4E6DE]" />
-              <div>
-                <span className="text-[10px] text-[#68736B] block">
-                  Proyectado fin de mes
-                </span>
-                <span className="text-xs font-bold tabular-nums text-[#23845B]">
-                  {monthProjection.projectedClosingBalance !== null
-                    ? formatMXN(monthProjection.projectedClosingBalance, {
-                        approximate:
-                          monthProjection.hasUnquantifiedPendingExpenses,
-                      })
-                    : "No disponible"}
-                </span>
-              </div>
-            </div>
-            <span
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${trafficBadge.bg} ${trafficBadge.text}`}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${trafficBadge.dot}`} />
-              {trafficBadge.label}
-            </span>
+        {/* Franja compacta manual (en flujo) o flotante al hacer scroll (fuera de flujo, sin cambiar altura del documento) */}
+        {isSummaryManuallyCollapsed && (
+          <div className="mt-2">{compactSummaryStrip}</div>
+        )}
+        {showFloatingSummaryStrip && (
+          <div className="absolute left-0 right-0 top-full px-4 pt-1 pb-2 bg-[#F6F5F0]/95 backdrop-blur-md border-b border-[#E4E6DE] shadow-sm">
+            {compactSummaryStrip}
           </div>
         )}
       </header>
 
       <div className="p-4 space-y-4">
         {/* Tarjeta de Resumen Financiero Expandida */}
-        {!isSummaryCollapsed && (
+        {!isSummaryManuallyCollapsed && (
           <section
             aria-label="Resumen financiero del mes"
             className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] shadow-xs space-y-3.5"
