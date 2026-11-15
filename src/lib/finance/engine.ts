@@ -709,6 +709,13 @@ export function filterTransactions(
   referenceDate: string
 ): Transaction[] {
   return transactions.filter((tx) => {
+    if (
+      tx.status === "cancelled" &&
+      !(filters.statuses as readonly string[]).includes("cancelled")
+    ) {
+      return false;
+    }
+
     if (filters.searchQuery.trim() !== "") {
       const q = filters.searchQuery.trim().toLowerCase();
       const matchTitle = tx.title.toLowerCase().includes(q);
