@@ -259,6 +259,8 @@ export interface NextIncomeStretch {
   };
 }
 
+export type ExcludedDayShift = "none" | "prev" | "next";
+
 export interface CustomScheduleDayItem {
   day: number | "last";
   amount?: number | null;
@@ -269,6 +271,9 @@ export interface ParsedRecurrenceSchedule {
   items: CustomScheduleDayItem[];
   alternateAmount: number | null;
   weekendShift: "none" | "friday";
+  excludedWeekdays: number[];
+  excludedMonthDays: number[];
+  excludedShift: ExcludedDayShift;
 }
 
 export interface FinancialInsightTip {
