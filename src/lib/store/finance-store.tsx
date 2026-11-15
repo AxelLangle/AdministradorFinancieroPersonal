@@ -777,9 +777,22 @@ export function FinanceStoreProvider({
     };
   }, [loadUserWorkspaceFromSupabase]);
 
+  const OVERLAY_SHEET_PAIRS: ReadonlyArray<readonly [ScreenId, ScreenId]> = [
+    ["P10", "P11"],
+    ["P18", "P19"],
+    ["P20", "P21"],
+  ];
+
+  const shouldPreserveScroll = (from: ScreenId, to: ScreenId): boolean =>
+    OVERLAY_SHEET_PAIRS.some(
+      ([base, sheet]) =>
+        (from === base && to === sheet) || (from === sheet && to === base)
+    );
+
   const setActiveScreen = useCallback(
     (next: ScreenId) => {
       if (next === activeScreen) return;
+      const preserveScroll = shouldPreserveScroll(activeScreen, next);
       setPreviousScreen(activeScreen);
       setScreenHistory((prev) => {
         const MAIN_TABS: ScreenId[] = ["P10", "P18", "P20", "P28"];
@@ -789,8 +802,8 @@ export function FinanceStoreProvider({
         return [...prev.slice(-14), activeScreen];
       });
       setActiveScreenState(next);
-      if (typeof window !== "undefined") {
-        window.scrollTo({ top: 0, behavior: "smooth" });
+      if (!preserveScroll && typeof window !== "undefined") {
+        window.scrollTo({ top: 0, behavior: "auto" });
       }
     },
     [activeScreen]
@@ -812,14 +825,15 @@ export function FinanceStoreProvider({
 
     const fallback: ScreenId =
       target || (TX_SCREENS.includes(previousScreen) ? "P10" : previousScreen || "P10");
+    const preserveScroll = shouldPreserveScroll(activeScreen, fallback);
 
     setScreenHistory(stack);
     setPreviousScreen(stack[stack.length - 1] || "P10");
     setActiveScreenState(fallback);
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
+    if (!preserveScroll && typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "auto" });
     }
-  }, [screenHistory, previousScreen, selectedTransactionId, transactions]);
+  }, [activeScreen, screenHistory, previousScreen, selectedTransactionId, transactions]);
 
   const goToPreviousMonth = useCallback(() => {
     setCurrentYearMonth((prev) => getPreviousYearMonth(prev));
