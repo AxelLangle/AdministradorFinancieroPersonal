@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { useFinanceStore } from "@/lib/store/finance-store";
 import {
   appearsOnCalendarDate,
+  explainFinancialProjection,
   formatDateDDMMYYYY,
   formatMonthYearEs,
   formatMXN,
@@ -63,6 +64,7 @@ export function CalendarCoreScreens() {
     categories,
     monthProjection,
     budgetSummary,
+    nextIncomeStretch,
     notifications,
     showToast,
     setIsTutorialOpen,
@@ -71,6 +73,8 @@ export function CalendarCoreScreens() {
   const [isSummaryManuallyCollapsed, setIsSummaryManuallyCollapsed] =
     useState(false);
   const [isScrolledPastSummary, setIsScrolledPastSummary] = useState(false);
+  const [isProjectionExplanationOpen, setIsProjectionExplanationOpen] =
+    useState(false);
   const isCalendarMainView = activeScreen === "P10" || activeScreen === "P11";
 
   const calendarSwipeHandlers = useHorizontalSwipe({
@@ -84,6 +88,11 @@ export function CalendarCoreScreens() {
   const daySheetDrag = useBottomSheetDragToDismiss({
     enabled: activeScreen === "P11",
     onClose: () => setActiveScreen("P10"),
+  });
+
+  const explanationSheetDrag = useBottomSheetDragToDismiss({
+    enabled: isProjectionExplanationOpen,
+    onClose: () => setIsProjectionExplanationOpen(false),
   });
 
   // Muestra la franja compacta flotante al hacer scroll hacia abajo sin desmontar la tarjeta principal (evita saltos de scroll)
@@ -358,6 +367,14 @@ export function CalendarCoreScreens() {
           label: "Riesgo de déficit",
         };
 
+  const projectionExplanation = explainFinancialProjection({
+    monthProjection,
+    budgetSummary,
+    nextIncomeStretch,
+    transactions,
+    referenceDate,
+  });
+
   const showFloatingSummaryStrip =
     !isSummaryManuallyCollapsed && isScrolledPastSummary;
 
@@ -384,12 +401,16 @@ export function CalendarCoreScreens() {
           </span>
         </div>
       </div>
-      <span
-        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${trafficBadge.bg} ${trafficBadge.text}`}
+      <button
+        type="button"
+        onClick={() => setIsProjectionExplanationOpen(true)}
+        title="Ver cómo se calcula tu proyección y consejos financieros"
+        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold border border-current/15 cursor-pointer ${trafficBadge.bg} ${trafficBadge.text}`}
       >
         <span className={`w-1.5 h-1.5 rounded-full ${trafficBadge.dot}`} />
-        {trafficBadge.label}
-      </span>
+        <span>{trafficBadge.label}</span>
+        <HelpCircle className="w-3 h-3 ml-0.5" />
+      </button>
     </div>
   );
 
@@ -596,6 +617,25 @@ export function CalendarCoreScreens() {
                   title="Pendiente"
                 />
               </div>
+            </div>
+
+            {/* Botón para explicar la proyección y mostrar consejos personalizados */}
+            <div className="pt-2 border-t border-[#E4E6DE]">
+              <button
+                type="button"
+                onClick={() => setIsProjectionExplanationOpen(true)}
+                className="w-full py-2.5 px-3.5 rounded-xl bg-[#F0F1EB] hover:bg-[#E8DCCB] border border-[#E4E6DE] text-[#26332D] text-xs font-semibold flex items-center justify-between gap-2 transition cursor-pointer"
+              >
+                <span className="flex items-center gap-2 text-left">
+                  <Sparkles className="w-4 h-4 text-[#23845B] shrink-0" />
+                  <span>
+                    ¿Cómo se calcula tu proyección? Ver explicación y consejos
+                  </span>
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-[#34483D] text-white text-[10px] font-bold shrink-0">
+                  {projectionExplanation.tips.length} consejos
+                </span>
+              </button>
             </div>
           </section>
         )}
@@ -1309,6 +1349,238 @@ export function CalendarCoreScreens() {
               >
                 <Plus className="w-4 h-4" />
                 <span>Nuevo ingreso</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal / Bottom Sheet: Explicación de la Proyección y Consejos Financieros */}
+      {isProjectionExplanationOpen && (
+        <div
+          onClick={explanationSheetDrag.handleBackdropClick}
+          className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[1px] flex items-end justify-center"
+        >
+          <div
+            {...explanationSheetDrag.sheetTouchHandlers}
+            style={explanationSheetDrag.sheetStyle}
+            className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl p-5 border-t border-[#E4E6DE] shadow-2xl max-h-[86vh] flex flex-col"
+          >
+            <div className="w-12 h-1.5 rounded-full bg-[#E4E6DE] mx-auto mb-3" />
+
+            <div className="flex items-center justify-between pb-3 border-b border-[#E4E6DE]">
+              <div>
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-[#23845B] flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Diagnóstico y Guía Financiera</span>
+                </span>
+                <h3 className="text-lg font-bold text-[#26332D]">
+                  ¿Cómo funciona tu proyección?
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsProjectionExplanationOpen(false)}
+                className="p-2 rounded-full bg-[#F0F1EB] text-[#68736B] hover:text-[#26332D] cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-4 space-y-4">
+              {/* 1. Resumen del estado actual */}
+              <div
+                className={`p-3.5 rounded-2xl border ${
+                  projectionExplanation.statusColor === "red"
+                    ? "bg-[#FDF2F2] border-[#F5CACA]"
+                    : projectionExplanation.statusColor === "amber"
+                    ? "bg-[#FEF6E7] border-[#F5DFA8]"
+                    : "bg-[#EDF7F2] border-[#C6E7D6]"
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span
+                    className={`w-2.5 h-2.5 rounded-full ${trafficBadge.dot}`}
+                  />
+                  <span className={`text-xs font-bold ${trafficBadge.text}`}>
+                    {projectionExplanation.headline}
+                  </span>
+                </div>
+                <p className="text-xs text-[#26332D] leading-relaxed">
+                  {projectionExplanation.summaryText}
+                </p>
+              </div>
+
+              {/* 2. Desglose matemático paso a paso */}
+              <div className="p-4 rounded-2xl bg-[#F6F5F0] border border-[#E4E6DE] space-y-2.5">
+                <div className="text-xs font-bold text-[#26332D]">
+                  La fórmula exacta de tu mes ({formatMonthYearEs(currentYearMonth)})
+                </div>
+                <p className="text-[11px] text-[#68736B] leading-relaxed">
+                  Tu proyección toma el dinero real que ya tienes hoy, le suma los ingresos que aún faltan por caer y le descuenta los recibos y gastos pendientes del mes:
+                </p>
+
+                <div className="space-y-2 pt-1 text-xs">
+                  <div className="flex items-center justify-between py-1.5 px-2.5 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE]">
+                    <span className="text-[#26332D] font-medium">
+                      1. {projectionExplanation.formula.startingLabel}
+                    </span>
+                    <span className="font-bold tabular-nums text-[#26332D]">
+                      {formatMXN(projectionExplanation.formula.startingAmount)}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between py-1.5 px-2.5 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE]">
+                    <span className="text-[#26332D] font-medium">
+                      2. (+) Ingresos programados por recibir
+                    </span>
+                    <span className="font-bold tabular-nums text-[#23845B]">
+                      +{formatMXN(projectionExplanation.formula.scheduledIncomesAmount)}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between py-1.5 px-2.5 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE]">
+                    <span className="text-[#26332D] font-medium">
+                      3. (−) Gastos pendientes por pagar
+                    </span>
+                    <span className="font-bold tabular-nums text-[#C94C4C]">
+                      -{formatMXN(projectionExplanation.formula.pendingExpensesAmount)}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between py-2 px-3 rounded-xl bg-[#34483D] text-white font-bold">
+                    <span>(=) Saldo proyectado fin de mes</span>
+                    <span className="tabular-nums">
+                      {formatMXN(projectionExplanation.formula.projectedClosingAmount, {
+                        approximate: monthProjection.hasUnquantifiedPendingExpenses,
+                      })}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-[#68736B] leading-relaxed pt-1">
+                  <strong>Nota importante:</strong> Los gastos que ya marcaste como <em>Pagados</em> y los ingresos ya <em>Recibidos</em> después de tu fecha de corte ya están reflejados dentro de tu <strong>Saldo líquido disponible hoy</strong>, por eso no se restan ni suman dos veces.
+                </div>
+              </div>
+
+              {/* 3. Radar de Liquidez Intermedia */}
+              <div className="p-4 rounded-2xl bg-[#FFFFFF] border border-[#E4E6DE] space-y-2">
+                <div className="text-xs font-bold text-[#26332D]">
+                  Radar de Liquidez Día por Día
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="p-2.5 rounded-xl bg-[#F6F5F0]">
+                    <span className="text-[10px] text-[#68736B] block">
+                      Día más bajo del mes
+                    </span>
+                    <span
+                      className={`font-bold tabular-nums block mt-0.5 ${
+                        (projectionExplanation.liquidityRadar.lowestBalance ?? 0) < 0
+                          ? "text-[#C94C4C]"
+                          : "text-[#26332D]"
+                      }`}
+                    >
+                      {formatMXN(projectionExplanation.liquidityRadar.lowestBalance)}
+                    </span>
+                    {projectionExplanation.liquidityRadar.lowestDate && (
+                      <span className="text-[10px] text-[#68736B]">
+                        el {formatShortDateEs(projectionExplanation.liquidityRadar.lowestDate)}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-[#F6F5F0]">
+                    <span className="text-[10px] text-[#68736B] block">
+                      Colchón mínimo (10%)
+                    </span>
+                    <span className="font-bold tabular-nums text-[#34483D] block mt-0.5">
+                      {formatMXN(projectionExplanation.liquidityRadar.minCushionAmount)}
+                    </span>
+                    <span className="text-[10px] text-[#68736B]">
+                      Reserva recomendada
+                    </span>
+                  </div>
+                </div>
+
+                {projectionExplanation.liquidityRadar.nextIncomeTitle && (
+                  <div className="p-2.5 rounded-xl bg-[#F0F5FA] border border-[#CFE0EE] text-[11px] text-[#26332D]">
+                    Tu próximo ingreso es{" "}
+                    <strong>{projectionExplanation.liquidityRadar.nextIncomeTitle}</strong>{" "}
+                    ({formatMXN(projectionExplanation.liquidityRadar.nextIncomeAmount)}) en{" "}
+                    <strong>
+                      {projectionExplanation.liquidityRadar.daysUntilNextIncome}{" "}
+                      {projectionExplanation.liquidityRadar.daysUntilNextIncome === 1
+                        ? "día"
+                        : "días"}
+                    </strong>
+                    . Llegarás justo antes de ese cobro con{" "}
+                    <strong className="tabular-nums">
+                      {formatMXN(projectionExplanation.liquidityRadar.balanceBeforeNextIncome)}
+                    </strong>
+                    .
+                  </div>
+                )}
+              </div>
+
+              {/* 4. Consejos personalizados según la situación */}
+              <div className="space-y-2.5">
+                <div className="text-xs font-bold uppercase tracking-wider text-[#68736B]">
+                  Consejos para mejorar tus finanzas hoy
+                </div>
+
+                {projectionExplanation.tips.map((tip) => {
+                  const badgeStyle =
+                    tip.severity === "urgent"
+                      ? "bg-[#FDF2F2] border-[#F5CACA] text-[#C94C4C]"
+                      : tip.severity === "warning"
+                      ? "bg-[#FEF6E7] border-[#F5DFA8] text-[#9A6712]"
+                      : tip.severity === "positive"
+                      ? "bg-[#EDF7F2] border-[#C6E7D6] text-[#23845B]"
+                      : "bg-[#F0F5FA] border-[#CFE0EE] text-[#527A9A]";
+
+                  return (
+                    <div
+                      key={tip.id}
+                      className={`p-3.5 rounded-2xl border space-y-2 ${badgeStyle}`}
+                    >
+                      <div className="text-xs font-bold">{tip.title}</div>
+                      <p className="text-xs text-[#26332D] leading-relaxed">
+                        {tip.description}
+                      </p>
+                      {tip.impactText && (
+                        <div className="text-[11px] font-bold">
+                          {tip.impactText}
+                        </div>
+                      )}
+                      {tip.actionScreen && tip.actionLabel && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (tip.actionTransactionId) {
+                              setSelectedTransactionId(tip.actionTransactionId);
+                            }
+                            setIsProjectionExplanationOpen(false);
+                            setActiveScreen(tip.actionScreen!);
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-[#26332D] text-white text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>{tip.actionLabel}</span>
+                          <ArrowUpRight className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-[#E4E6DE]">
+              <button
+                type="button"
+                onClick={() => setIsProjectionExplanationOpen(false)}
+                className="w-full py-3 rounded-xl bg-[#34483D] text-white text-xs font-semibold cursor-pointer"
+              >
+                Entendido, volver a mi calendario
               </button>
             </div>
           </div>
