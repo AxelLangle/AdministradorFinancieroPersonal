@@ -1393,26 +1393,57 @@ export function FinanceStoreProvider({
 
   const updateBudget = useCallback(
     async (updates: Partial<Budget>) => {
-      const nextBudget = { ...budget, ...updates };
+      const normalizedMonth =
+        updates.month || budget.month || `${currentYearMonth}-01`;
+      const nextBudget: Budget = {
+        ...budget,
+        ...updates,
+        month: normalizedMonth,
+      };
       setBudget(nextBudget);
 
       if (user.isAuthenticated && workspaceId) {
-        await supabase.from("budgets").upsert(
-          {
-            workspace_id: workspaceId,
-            month: nextBudget.month,
-            total_limit: nextBudget.total_limit,
-            alert_threshold_percent: nextBudget.alert_threshold_percent,
-            min_cushion_amount: nextBudget.min_cushion_amount,
-            min_cushion_percent: nextBudget.min_cushion_percent,
-          },
-          { onConflict: "workspace_id,month" }
-        );
+        const { data, error } = await supabase
+          .from("budgets")
+          .upsert(
+            {
+              workspace_id: workspaceId,
+              month: nextBudget.month,
+              total_limit: nextBudget.total_limit,
+              alert_threshold_percent: nextBudget.alert_threshold_percent,
+              min_cushion_amount: nextBudget.min_cushion_amount,
+              min_cushion_percent: nextBudget.min_cushion_percent,
+            },
+            { onConflict: "workspace_id,month" }
+          )
+          .select()
+          .single();
+
+        if (error) {
+          console.error("Error guardando presupuesto mensual:", error);
+          showToast("No se pudo guardar el límite mensual. Intenta de nuevo.");
+          return;
+        }
+
+        if (data) {
+          setBudget({
+            id: data.id,
+            workspace_id: data.workspace_id,
+            month: data.month,
+            total_limit: Number(data.total_limit),
+            alert_threshold_percent: Number(data.alert_threshold_percent),
+            min_cushion_amount:
+              data.min_cushion_amount !== null
+                ? Number(data.min_cushion_amount)
+                : null,
+            min_cushion_percent: Number(data.min_cushion_percent),
+          });
+        }
       }
 
-      showToast("Presupuesto mensual guardado");
+      showToast("Límite de gasto mensual guardado");
     },
-    [budget, user.isAuthenticated, workspaceId, showToast]
+    [budget, currentYearMonth, user.isAuthenticated, workspaceId, showToast]
   );
 
   const updateAccountOpeningBalance = useCallback(
