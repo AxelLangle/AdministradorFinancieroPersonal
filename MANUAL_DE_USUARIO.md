@@ -75,10 +75,11 @@ La pantalla principal **Inicio** se divide en tres zonas diseñadas para usarse 
      - **Punto verde**: Ingreso esperado o recibido.
      - **Círculo sólido (`●`)**: Gasto **Esencial** (obligatorio e impostergable).
      - **Diamante (`◆`)**: Gasto **Importante** (necesario pero ajustable).
-     - **Triángulo (`▲`)**: Gasto **Flexible** (discrecional, ocio o suscripciones).
-   - Al tocar cualquier día del calendario, se abre la hoja inferior **Detalle del Día**, desde donde puedes confirmar pagos o agregar un nuevo movimiento directamente en esa fecha.
-3. **Lista de Compromisos por Resolver**:
-   - Debajo del calendario aparecen todos los pagos pendientes o vencidos y los ingresos por cobrar del mes, con botones directos de **Confirmar pago** o **Confirmar cobro**.
+     - **Círculo hueco (`○`)**: Gasto **Flexible** (discrecional, ocio o suscripciones).
+     - **Palomita verde (`✓`)**: Todos los movimientos de ese día ya fueron confirmados como **Pagados** o **Recibidos** (nunca desaparecen del calendario al confirmarse).
+   - Al tocar cualquier día del calendario, se abre la hoja inferior **Detalle del Día**, donde ves tanto los pendientes como los ya confirmados en esa fecha (o en su fecha originalmente programada).
+3. **Por pagar o cobrar vs. Confirmados este mes**:
+   - Debajo del calendario encontrarás primero tus compromisos **Por pagar o cobrar** con botones directos de **Confirmar pago** o **Confirmar cobro**, y enseguida la sección **Confirmados este mes**, para que cualquier gasto que marques como pagado siga visible en tu pantalla principal.
 
 ---
 
@@ -104,10 +105,15 @@ $$\text{Saldo Proyectado} = \text{Saldo Actual} + \text{Ingresos Programados Vig
 
 ## 6. Registro, Detalle y Confirmación de Movimientos (Gastos e Ingresos)
 
-### Botón Central `+ Nuevo`
-Desde la barra inferior puedes crear un gasto o ingreso eligiendo su estado inicial:
-- **Pendiente (Por pagar) / Programado (Por recibir)**: Se agenda en el calendario para pagarse o cobrarse después.
-- **Ya pagado / Ya recibido**: Registra un movimiento que ya liquidaste hoy o en días pasados.
+### Botón Central `+ Nuevo`: ¿Programado o Recibido? ¿Pendiente o Pagado?
+Al registrar un movimiento eliges si es a futuro o ya ocurrió en tu cuenta:
+
+| Tipo | Estado futuro (aún no ocurre) | Estado liquidado (ya ocurrió) |
+| :--- | :--- | :--- |
+| **Ingreso** | **Programado (Aún no entra)**: Úsalo para quincenas futuras, bonos o pagos que esperas cobrar después. **No cambia tu Saldo Actual hoy**, pero sí se contempla en tu **Saldo Proyectado** de fin de mes. | **Recibido (Ya entró a tu cuenta)**: Úsalo cuando el dinero ya te cayó o lo tienes en efectivo hoy/antes. **Suma de inmediato a tu Saldo Actual** (salvo fechas previas a tu corte inicial). |
+| **Gasto** | **Pendiente (Por pagar después)**: Úsalo para recibos, renta o mensualidades futuras. No resta de tu Saldo Actual hoy, pero se aparta en tu Proyección y Presupuesto. | **Pagado (Ya salió el dinero)**: Úsalo para compras o recibos ya liquidados. **Descuenta de inmediato tu Saldo Actual** y queda visible como Pagado en el calendario. |
+
+> **Consejo rápido:** Si todavía no tienes el dinero en el banco o aún no pagas el recibo, usa siempre **Programado** (para ingresos) o **Pendiente** (para gastos), y confírmalo cuando llegue el día.
 
 ### Monto Fijo (`$`) vs. Monto Variable (`~$`) y "Monto por definir"
 - **Fijo (`$`)**: Conoces la cantidad exacta (ej. Renta `$8,500.00` o Netflix `$249.00`).
