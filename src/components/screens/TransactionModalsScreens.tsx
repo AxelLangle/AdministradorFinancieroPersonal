@@ -16,10 +16,12 @@ import {
   PriorityGeometryIcon,
   StatusBadge,
 } from "@/components/ui/PriorityBadge";
+import { CurrencyInput } from "@/components/ui/CurrencyInput";
 import type {
   AmountType,
   PriorityLevel,
   RecurrenceEditScope,
+  RecurrenceFrequency,
 } from "@/lib/finance/types";
 import {
   ArrowLeft,
@@ -33,6 +35,7 @@ import {
   XCircle,
   Edit3,
   ShieldAlert,
+  Trash2,
 } from "lucide-react";
 
 export function TransactionModalsScreens() {
@@ -51,154 +54,110 @@ export function TransactionModalsScreens() {
     budgetSummary,
     createTransaction,
     updateTransaction,
+    deleteTransaction,
     confirmExpensePayment,
     confirmIncomeReceipt,
     rescheduleTransaction,
     cancelTransaction,
+    createRecurrenceRule,
     referenceDate,
   } = useFinanceStore();
 
-  // Estados compartidos para P12, P12B, P13, P13B
+  // Estados compartidos para formulario de Nuevo Gasto / Nuevo Ingreso
   const isIncomeScreen = activeScreen === "P13" || activeScreen === "P13B";
   const isSettledMode = activeScreen === "P12B" || activeScreen === "P13B";
 
-  const [title, setTitle] = useState(
-    isIncomeScreen
-      ? isSettledMode
-        ? "Reembolso gastos médicos"
-        : "Bono trimestral productividad"
-      : isSettledMode
-      ? "Farmacia San Pablo"
-      : "Servicio de agua SACMEX"
-  );
-  const [amountStr, setAmountStr] = useState(
-    isIncomeScreen
-      ? isSettledMode
-        ? "1250.00"
-        : "3500.00"
-      : isSettledMode
-      ? "480.00"
-      : "420.00"
-  );
-  const [dateVal, setDateVal] = useState(
-    isSettledMode ? "2026-11-12" : selectedDate || "2026-11-20"
-  );
-  const [categoryId, setCategoryId] = useState(
-    isIncomeScreen
-      ? "cat-freelance"
-      : isSettledMode
-      ? "cat-salud"
-      : "cat-servicios"
-  );
-  const [priority, setPriority] = useState<PriorityLevel>(
-    isSettledMode ? "important" : "essential"
-  );
-  const [amountType, setAmountType] = useState<AmountType>(
-    isSettledMode ? "fixed" : "variable"
-  );
+  const [title, setTitle] = useState("");
+  const [amountNum, setAmountNum] = useState(0);
+  const [dateVal, setDateVal] = useState(selectedDate || referenceDate);
+  const [categoryId, setCategoryId] = useState<string>("");
+  const [priority, setPriority] = useState<PriorityLevel>("essential");
+  const [amountType, setAmountType] = useState<AmountType>("fixed");
   const [isRecurring, setIsRecurring] = useState(false);
+  const [recurringFrequency, setRecurringFrequency] =
+    useState<RecurrenceFrequency>("monthly");
   const [notes, setNotes] = useState("");
 
+  const availableCats = categories.filter(
+    (c) =>
+      c.is_active &&
+      (c.kind === (isIncomeScreen ? "income" : "expense") || c.kind === "both")
+  );
+
   useEffect(() => {
-    if (activeScreen === "P12") {
-      setTitle("Servicio de agua SACMEX");
-      setAmountStr("420.00");
-      setDateVal("2026-11-20");
-      setCategoryId("cat-servicios");
-      setPriority("essential");
-      setAmountType("variable");
-    } else if (activeScreen === "P12B") {
-      setTitle("Farmacia San Pablo");
-      setAmountStr("480.00");
-      setDateVal("2026-11-12"); // Fecha anterior al 18/11 para demostrar el banner azul informativo de corte
-      setCategoryId("cat-salud");
-      setPriority("important");
-      setAmountType("fixed");
-    } else if (activeScreen === "P13") {
-      setTitle("Proyecto consultoría UX");
-      setAmountStr("4500.00");
-      setDateVal("2026-11-26");
-      setCategoryId("cat-freelance");
-      setPriority("important");
-      setAmountType("variable");
-    } else if (activeScreen === "P13B") {
-      setTitle("Venta monitor usado");
-      setAmountStr("1800.00");
-      setDateVal("2026-11-10"); // Fecha anterior al 18/11 para demostrar el banner azul informativo de corte
-      setCategoryId("cat-freelance");
-      setPriority("flexible");
-      setAmountType("fixed");
+    if (
+      activeScreen === "P12" ||
+      activeScreen === "P12B" ||
+      activeScreen === "P13" ||
+      activeScreen === "P13B"
+    ) {
+      setDateVal(selectedDate || referenceDate);
+      const firstMatchingCat = categories.find(
+        (c) =>
+          c.is_active &&
+          (c.kind ===
+            (activeScreen === "P13" || activeScreen === "P13B"
+              ? "income"
+              : "expense") ||
+            c.kind === "both")
+      );
+      if (firstMatchingCat) {
+        setCategoryId(firstMatchingCat.id);
+        setPriority(firstMatchingCat.default_priority);
+      }
     }
-  }, [activeScreen]);
+  }, [activeScreen, selectedDate, referenceDate, categories]);
 
-  // Transacción seleccionada para P14, P15, P16, P17
+  // Transacción seleccionada para Detalle, Confirmación o Alcance
   const selectedTx =
-    transactions.find((t) => t.id === selectedTransactionId) ||
-    transactions.find((t) => t.id === "tx-exp-05") ||
-    transactions[0];
+    transactions.find((t) => t.id === selectedTransactionId) || transactions[0];
 
-  const [confirmAmountStr, setConfirmAmountStr] = useState("680.00");
+  const [confirmAmountNum, setConfirmAmountNum] = useState(0);
   const [confirmDateStr, setConfirmDateStr] = useState(referenceDate);
   const [confirmNotes, setConfirmNotes] = useState("");
-  const [rescheduleDateStr, setRescheduleDateStr] = useState("2026-11-20");
+  const [rescheduleDateStr, setRescheduleDateStr] = useState(referenceDate);
 
-  // Estados para P17 (Alcance de edición recurrente)
+  // Estados para Edición de Movimiento / Alcance Recurrente
   const [scopeChoice, setScopeChoice] =
     useState<RecurrenceEditScope>("future");
-  const [scopeAmountStr, setScopeAmountStr] = useState("249.00");
-  const [scopeTitleStr, setScopeTitleStr] = useState("Netflix estándar");
+  const [scopeAmountNum, setScopeAmountNum] = useState(0);
+  const [scopeTitleStr, setScopeTitleStr] = useState("");
 
   useEffect(() => {
-    if (activeScreen === "P15") {
-      const target =
-        selectedTx?.type === "expense"
-          ? selectedTx
-          : transactions.find((t) => t.id === "tx-exp-05") || selectedTx;
-      const est = target?.estimated_amount ?? 650;
-      // En P15 pre-llenamos $680 para mostrar el badge de diferencia (+$30.00 más de lo estimado) si es Luz CFE
-      setConfirmAmountStr(
-        target?.id === "tx-exp-05" ? "680.00" : String(est.toFixed(2))
+    if (activeScreen === "P14" && selectedTx) {
+      setRescheduleDateStr(selectedTx.expected_date);
+    } else if (activeScreen === "P15" && selectedTx) {
+      setConfirmAmountNum(
+        selectedTx.actual_amount ?? selectedTx.estimated_amount ?? 0
       );
       setConfirmDateStr(referenceDate);
-      setConfirmNotes(target?.notes || "");
-    } else if (activeScreen === "P16") {
-      const target =
-        selectedTx?.type === "income"
-          ? selectedTx
-          : transactions.find((t) => t.id === "tx-inc-02") || selectedTx;
-      const est = target?.estimated_amount ?? 3000;
-      setConfirmAmountStr(String(est.toFixed(2)));
+      setConfirmNotes(selectedTx.notes || "");
+    } else if (activeScreen === "P16" && selectedTx) {
+      setConfirmAmountNum(
+        selectedTx.actual_amount ?? selectedTx.estimated_amount ?? 0
+      );
       setConfirmDateStr(referenceDate);
-      setConfirmNotes(target?.notes || "");
-    } else if (activeScreen === "P17") {
-      const target =
-        selectedTx?.recurrence_rule_id
-          ? selectedTx
-          : transactions.find((t) => t.id === "tx-exp-07") || selectedTx;
-      setScopeTitleStr(target?.title || "Netflix estándar");
-      setScopeAmountStr(String((target?.estimated_amount ?? 249).toFixed(2)));
+      setConfirmNotes(selectedTx.notes || "");
+    } else if (activeScreen === "P17" && selectedTx) {
+      setScopeTitleStr(selectedTx.title);
+      setScopeAmountNum(
+        selectedTx.actual_amount ?? selectedTx.estimated_amount ?? 0
+      );
+      setScopeChoice(selectedTx.recurrence_rule_id ? "future" : "single");
     }
-  }, [activeScreen, selectedTx, transactions, referenceDate]);
+  }, [activeScreen, selectedTx, referenceDate]);
 
-  // === P12, P12B, P13, P13B: Formulario Dinámico de Nuevo Gasto / Nuevo Ingreso ===
+  // === Formulario Dinámico de Nuevo Gasto / Nuevo Ingreso ===
   if (
     activeScreen === "P12" ||
     activeScreen === "P12B" ||
     activeScreen === "P13" ||
     activeScreen === "P13B"
   ) {
-    const parsedAmount = Number(amountStr) || 0;
     const isPriorToCutoff =
       isSettledMode && isDateBeforeOpeningBalance(dateVal, account);
 
-    const availableCats = categories.filter(
-      (c) =>
-        c.is_active &&
-        (c.kind === (isIncomeScreen ? "income" : "expense") ||
-          c.kind === "both")
-    );
-
-    const handleSave = (e: React.FormEvent) => {
+    const handleSave = async (e: React.FormEvent) => {
       e.preventDefault();
       const status = isIncomeScreen
         ? isSettledMode
@@ -210,29 +169,65 @@ export function TransactionModalsScreens() {
         ? "overdue"
         : "pending";
 
-      const created = createTransaction({
-        type: isIncomeScreen ? "income" : "expense",
-        title: title.trim() || (isIncomeScreen ? "Ingreso" : "Gasto"),
-        category_id: categoryId,
-        priority,
-        status,
-        amount_type: amountType,
-        estimated_amount: parsedAmount,
-        actual_amount: isSettledMode ? parsedAmount : null,
-        expected_date: dateVal,
-        settled_date: isSettledMode ? dateVal : null,
-        settled_at: isSettledMode
-          ? isPriorToCutoff
-            ? `${dateVal}T12:00:00.000Z`
-            : new Date().toISOString()
-          : null,
-        recurrence_rule_id: null,
-        occurrence_date: null,
-        is_exception: false,
-        notes: notes.trim() || null,
-      });
+      const dayOfMonth = Number(dateVal.split("-")[2]) || 1;
 
-      setSelectedTransactionId(created.id);
+      if (isRecurring) {
+        await createRecurrenceRule({
+          type: isIncomeScreen ? "income" : "expense",
+          title:
+            title.trim() ||
+            (isIncomeScreen ? "Ingreso recurrente" : "Gasto recurrente"),
+          category_id: categoryId || null,
+          priority,
+          amount_type: amountType,
+          default_amount: amountNum > 0 ? amountNum : null,
+          frequency: recurringFrequency,
+          interval_count: 1,
+          day_of_month: dayOfMonth,
+          semimonthly_days:
+            recurringFrequency === "semimonthly" ? "15,last" : null,
+          day_of_week: null,
+          start_date: dateVal,
+          end_date: null,
+          status: "active",
+          notes:
+            notes.trim() ||
+            `Frecuencia ${
+              recurringFrequency === "monthly" ? "mensual" : "quincenal"
+            }`,
+        });
+      } else {
+        const created = await createTransaction({
+          type: isIncomeScreen ? "income" : "expense",
+          title: title.trim() || (isIncomeScreen ? "Ingreso" : "Gasto"),
+          category_id: categoryId || null,
+          priority,
+          status,
+          amount_type: amountType,
+          estimated_amount:
+            !isSettledMode && amountType === "variable" && amountNum === 0
+              ? null
+              : amountNum,
+          actual_amount: isSettledMode ? amountNum : null,
+          expected_date: dateVal,
+          settled_date: isSettledMode ? dateVal : null,
+          settled_at: isSettledMode
+            ? isPriorToCutoff
+              ? `${dateVal}T12:00:00.000Z`
+              : new Date().toISOString()
+            : null,
+          recurrence_rule_id: null,
+          occurrence_date: null,
+          is_exception: false,
+          notes: notes.trim() || null,
+        });
+        setSelectedTransactionId(created.id);
+      }
+
+      setTitle("");
+      setAmountNum(0);
+      setNotes("");
+      setIsRecurring(false);
       setActiveScreen("P10");
     };
 
@@ -249,14 +244,10 @@ export function TransactionModalsScreens() {
             <span>Cancelar</span>
           </button>
           <h1 className="text-base font-bold text-[#26332D]">
-            {isIncomeScreen ? "Nuevo ingreso" : "Nuevo gasto"}
+            {isIncomeScreen ? "Registrar ingreso" : "Registrar gasto"}
           </h1>
-          <span className="text-[11px] font-bold text-[#34483D] bg-[#E8DCCB] px-2 py-0.5 rounded-md">
-            {activeScreen === "P12B"
-              ? "P12-B"
-              : activeScreen === "P13B"
-              ? "P13-B"
-              : activeScreen}
+          <span className="text-[11px] font-semibold text-[#34483D] bg-[#E8DCCB] px-2.5 py-0.5 rounded-full">
+            {isIncomeScreen ? "Entrada" : "Salida"}
           </span>
         </div>
 
@@ -264,9 +255,7 @@ export function TransactionModalsScreens() {
         <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-[#E4E6DE]/70 mb-4">
           <button
             type="button"
-            onClick={() =>
-              setActiveScreen(isSettledMode ? "P12B" : "P12")
-            }
+            onClick={() => setActiveScreen(isSettledMode ? "P12B" : "P12")}
             className={`py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
               !isIncomeScreen
                 ? "bg-[#FFFFFF] text-[#26332D] shadow-xs"
@@ -277,9 +266,7 @@ export function TransactionModalsScreens() {
           </button>
           <button
             type="button"
-            onClick={() =>
-              setActiveScreen(isSettledMode ? "P13B" : "P13")
-            }
+            onClick={() => setActiveScreen(isSettledMode ? "P13B" : "P13")}
             className={`py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
               isIncomeScreen
                 ? "bg-[#FFFFFF] text-[#23845B] shadow-xs"
@@ -290,17 +277,15 @@ export function TransactionModalsScreens() {
           </button>
         </div>
 
-        {/* Conmutador de Estado Dinámico (Pendiente/Programado vs Pagado/Recibido - PRD 6.4) */}
+        {/* Conmutador de Estado Dinámico */}
         <div className="bg-[#FFFFFF] rounded-2xl p-3.5 border border-[#E4E6DE] mb-4">
           <label className="block text-[11px] font-bold uppercase tracking-wider text-[#68736B] mb-2">
-            Estado del movimiento
+            ¿En qué estado se encuentra este movimiento?
           </label>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() =>
-                setActiveScreen(isIncomeScreen ? "P13" : "P12")
-              }
+              onClick={() => setActiveScreen(isIncomeScreen ? "P13" : "P12")}
               className={`py-2.5 px-3 rounded-xl text-xs font-semibold border transition cursor-pointer ${
                 !isSettledMode
                   ? "bg-[#34483D] text-white border-[#34483D]"
@@ -313,9 +298,7 @@ export function TransactionModalsScreens() {
             </button>
             <button
               type="button"
-              onClick={() =>
-                setActiveScreen(isIncomeScreen ? "P13B" : "P12B")
-              }
+              onClick={() => setActiveScreen(isIncomeScreen ? "P13B" : "P12B")}
               className={`py-2.5 px-3 rounded-xl text-xs font-semibold border transition cursor-pointer ${
                 isSettledMode
                   ? "bg-[#23845B] text-white border-[#23845B]"
@@ -325,6 +308,15 @@ export function TransactionModalsScreens() {
               {isIncomeScreen ? "Ya recibido" : "Ya pagado"}
             </button>
           </div>
+          <p className="text-[11px] text-[#68736B] mt-2 leading-relaxed">
+            {!isSettledMode
+              ? isIncomeScreen
+                ? "Se agendará en el calendario y sumará a tu Saldo Proyectado hasta que confirmes su cobro."
+                : "Se agendará en el calendario y se descontará de tu Saldo Proyectado y Presupuesto Disponible."
+              : isIncomeScreen
+              ? "Impactará de inmediato tu Saldo Actual porque el dinero ya ingresó a tu cuenta."
+              : "Descontará de inmediato tu Saldo Actual porque el pago ya fue realizado."}
+          </p>
         </div>
 
         <form onSubmit={handleSave} className="space-y-4 flex-1">
@@ -338,19 +330,22 @@ export function TransactionModalsScreens() {
                     : "Monto real pagado (MXN)"
                   : "Monto estimado (MXN)"}
               </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-lg font-bold text-[#68736B]">
-                  {amountType === "variable" && !isSettledMode ? "~$" : "$"}
-                </span>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={amountStr}
-                  onChange={(e) => setAmountStr(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-2xl font-bold tabular-nums text-[#26332D]"
-                />
-              </div>
+              <CurrencyInput
+                value={amountNum}
+                onChange={(_, num) => setAmountNum(num)}
+                prefix={
+                  amountType === "variable" && !isSettledMode ? "~$" : "$"
+                }
+                placeholder={
+                  isIncomeScreen ? "Ej. 12,000.00" : "Ej. 650.00"
+                }
+                required={isSettledMode || amountType === "fixed"}
+              />
+              {!isSettledMode && amountType === "variable" && (
+                <p className="text-[11px] text-[#68736B] mt-1">
+                  Si aún no conoces el monto aproximado del recibo, puedes dejarlo en <strong>0.00</strong> y se marcará como &ldquo;Monto por definir&rdquo;.
+                </p>
+              )}
             </div>
 
             {!isSettledMode && (
@@ -394,7 +389,11 @@ export function TransactionModalsScreens() {
                 required
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Ej. Recibo de luz CFE"
+                placeholder={
+                  isIncomeScreen
+                    ? "Ej. Quincena de nómina, Proyecto diseño, Venta..."
+                    : "Ej. Recibo de luz CFE, Supermercado, Gasolina..."
+                }
                 className="w-full px-3.5 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-sm font-medium text-[#26332D]"
               />
             </div>
@@ -419,7 +418,7 @@ export function TransactionModalsScreens() {
             </div>
           </div>
 
-          {/* Banner informativo azul cuando la fecha real es anterior a opening_balance_date (PRD 4.6, P12-B y P13-B) */}
+          {/* Banner informativo azul cuando la fecha real es anterior a opening_balance_date */}
           {isPriorToCutoff && (
             <div className="p-3.5 rounded-2xl bg-[#F0F5FA] border border-[#CFE0EE] flex items-start gap-2.5">
               <Info className="w-4 h-4 text-[#527A9A] shrink-0 mt-0.5" />
@@ -429,8 +428,11 @@ export function TransactionModalsScreens() {
                   {formatDateDDMMYYYY(account.opening_balance_date)})
                 </strong>
                 Este {isIncomeScreen ? "ingreso recibido" : "gasto pagado"} el{" "}
-                <strong>{formatDateDDMMYYYY(dateVal)}</strong> se sumará a tus totales de noviembre y a tu presupuesto mensual, pero{" "}
-                <strong>no modificará tu saldo actual ({formatMXN(account.opening_balance)})</strong> porque ya estaba contemplado cuando definiste tu saldo inicial.
+                <strong>{formatDateDDMMYYYY(dateVal)}</strong> se sumará a tus estadísticas del mes y a tu presupuesto mensual, pero{" "}
+                <strong>
+                  no modificará tu saldo actual ({formatMXN(account.opening_balance)})
+                </strong>{" "}
+                porque ya estaba contemplado cuando definiste tu saldo inicial.
               </div>
             </div>
           )}
@@ -493,17 +495,46 @@ export function TransactionModalsScreens() {
               </div>
             )}
 
-            <div className="flex items-center justify-between pt-2 border-t border-[#E4E6DE]">
-              <div className="flex items-center gap-2 text-xs font-semibold text-[#26332D]">
-                <Repeat className="w-4 h-4 text-[#34483D]" />
-                <span>¿Se repite periódicamente?</span>
+            <div className="pt-2 border-t border-[#E4E6DE] space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-semibold text-[#26332D]">
+                  <Repeat className="w-4 h-4 text-[#34483D]" />
+                  <span>¿Se repite periódicamente?</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={isRecurring}
+                  onChange={(e) => setIsRecurring(e.target.checked)}
+                  className="w-4 h-4 accent-[#34483D]"
+                />
               </div>
-              <input
-                type="checkbox"
-                checked={isRecurring}
-                onChange={(e) => setIsRecurring(e.target.checked)}
-                className="w-4 h-4 accent-[#34483D]"
-              />
+
+              {isRecurring && (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setRecurringFrequency("monthly")}
+                    className={`py-2 rounded-xl text-xs font-semibold border cursor-pointer ${
+                      recurringFrequency === "monthly"
+                        ? "bg-[#34483D] text-white border-[#34483D]"
+                        : "bg-[#F0F1EB] text-[#26332D] border-[#E4E6DE]"
+                    }`}
+                  >
+                    Mensual
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRecurringFrequency("biweekly")}
+                    className={`py-2 rounded-xl text-xs font-semibold border cursor-pointer ${
+                      recurringFrequency === "biweekly"
+                        ? "bg-[#34483D] text-white border-[#34483D]"
+                        : "bg-[#F0F1EB] text-[#26332D] border-[#E4E6DE]"
+                    }`}
+                  >
+                    Quincenal
+                  </button>
+                </div>
+              )}
             </div>
 
             <div>
@@ -514,7 +545,7 @@ export function TransactionModalsScreens() {
                 type="text"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Ej. Referencia o método de pago"
+                placeholder="Ej. Número de referencia, tarjeta utilizada o recordatorio"
                 className="w-full px-3.5 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs text-[#26332D]"
               />
             </div>
@@ -537,13 +568,31 @@ export function TransactionModalsScreens() {
     );
   }
 
-  // === P14: Detalle de un Movimiento (con Tarjeta "Estimado vs. Real" y Bitácora) ===
+  // Si no existe ningún movimiento seleccionado
+  if (!selectedTx) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3">
+        <p className="text-sm font-bold text-[#26332D]">
+          No hay ningún movimiento seleccionado
+        </p>
+        <button
+          type="button"
+          onClick={() => setActiveScreen("P10")}
+          className="px-4 py-2.5 rounded-xl bg-[#34483D] text-white text-xs font-semibold cursor-pointer"
+        >
+          Volver al calendario
+        </button>
+      </div>
+    );
+  }
+
+  // === Detalle de un Movimiento (con Tarjeta "Estimado vs. Real" y Bitácora) ===
   if (activeScreen === "P14") {
     const tx = selectedTx;
     const overdue = isExpenseOverdue(tx, referenceDate);
     const delayed = isIncomeDelayed(tx, referenceDate);
     const catName =
-      categories.find((c) => c.id === tx.category_id)?.name || "Servicios";
+      categories.find((c) => c.id === tx.category_id)?.name || "General";
     const linkedRule = recurrenceRules.find(
       (r) => r.id === tx.recurrence_rule_id
     );
@@ -564,37 +613,11 @@ export function TransactionModalsScreens() {
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#68736B] hover:text-[#26332D] cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Volver</span>
+            <span>Volver al calendario</span>
           </button>
           <span className="text-xs font-bold text-[#26332D]">
             Detalle de movimiento
           </span>
-          <span className="text-[11px] font-bold text-[#34483D] bg-[#E8DCCB] px-2 py-0.5 rounded-md">
-            P14
-          </span>
-        </div>
-
-        {/* Selector rápido de movimiento de ejemplo para inspección en P14 */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-          {[
-            { id: "tx-exp-05", label: "Luz CFE (Vencido)" },
-            { id: "tx-exp-04", label: "Gasolina (Pagado c/dif)" },
-            { id: "tx-inc-02", label: "Freelance (Atrasado)" },
-            { id: "tx-exp-07", label: "Netflix (Recurrente)" },
-          ].map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setSelectedTransactionId(item.id)}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-semibold shrink-0 border cursor-pointer ${
-                tx.id === item.id
-                  ? "bg-[#34483D] text-white border-[#34483D]"
-                  : "bg-[#FFFFFF] text-[#68736B] border-[#E4E6DE]"
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
         </div>
 
         {/* Hero Card del Movimiento */}
@@ -658,14 +681,16 @@ export function TransactionModalsScreens() {
           </div>
         </div>
 
-        {/* Tarjeta comparativa "Estimado vs. Real" (PRD 6.3 / P14) */}
+        {/* Tarjeta comparativa "Estimado vs. Real" */}
         <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-bold uppercase tracking-wider text-[#68736B]">
               Comparativa: Estimado vs. Real
             </h2>
             <span className="text-[11px] font-semibold text-[#34483D] bg-[#F0F1EB] px-2 py-0.5 rounded-md">
-              {tx.amount_type === "variable" ? "Monto variable (~)" : "Monto fijo"}
+              {tx.amount_type === "variable"
+                ? "Monto variable (~)"
+                : "Monto fijo"}
             </span>
           </div>
 
@@ -716,9 +741,11 @@ export function TransactionModalsScreens() {
                 <Repeat className="w-4 h-4 text-[#34483D]" />
                 <div>
                   <div className="font-bold text-[#26332D]">
-                    Regla recurrente vinculada
+                    Compromiso recurrente vinculado
                   </div>
-                  <div className="text-[#68736B]">{linkedRule.notes}</div>
+                  <div className="text-[#68736B]">
+                    {linkedRule.notes || "Se repite automáticamente"}
+                  </div>
                 </div>
               </div>
               <button
@@ -726,7 +753,7 @@ export function TransactionModalsScreens() {
                 onClick={() => setActiveScreen("P17")}
                 className="px-2.5 py-1 rounded-lg bg-[#F0F1EB] hover:bg-[#E8DCCB] text-[#34483D] font-semibold cursor-pointer"
               >
-                Alcance (P17)
+                Editar serie
               </button>
             </div>
           )}
@@ -764,12 +791,12 @@ export function TransactionModalsScreens() {
           )}
         </div>
 
-        {/* Historial de cambios (audit_log) */}
+        {/* Historial de cambios */}
         {txAuditEntries.length > 0 && (
           <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-2">
             <div className="flex items-center gap-1.5 text-xs font-bold text-[#68736B]">
               <History className="w-3.5 h-3.5" />
-              <span>Bitácora de cambios (audit_log)</span>
+              <span>Historial de actualizaciones</span>
             </div>
             {txAuditEntries.map((entry) => (
               <div
@@ -777,7 +804,7 @@ export function TransactionModalsScreens() {
                 className="text-[11px] text-[#68736B] flex items-center justify-between py-1 border-t border-[#E4E6DE]"
               >
                 <span>
-                  Campo <strong>{entry.field_changed}</strong>:{" "}
+                  Cambio en <strong>{entry.field_changed}</strong>:{" "}
                   {entry.old_value ?? "vacío"} →{" "}
                   <strong className="text-[#26332D]">{entry.new_value}</strong>
                 </span>
@@ -798,7 +825,7 @@ export function TransactionModalsScreens() {
               className="w-full py-3.5 px-4 rounded-xl bg-[#34483D] hover:bg-[#26332D] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>Confirmar pago (P15)</span>
+              <span>Confirmar pago</span>
             </button>
           )}
 
@@ -809,7 +836,7 @@ export function TransactionModalsScreens() {
               className="w-full py-3.5 px-4 rounded-xl bg-[#23845B] hover:bg-[#1D6E4B] text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>Confirmar recepción de ingreso (P16)</span>
+              <span>Confirmar recepción de ingreso</span>
             </button>
           )}
 
@@ -820,7 +847,7 @@ export function TransactionModalsScreens() {
               className="py-2.5 px-3 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#26332D] flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Edit3 className="w-3.5 h-3.5" />
-              <span>Editar alcance (P17)</span>
+              <span>Editar concepto o monto</span>
             </button>
             <button
               type="button"
@@ -834,25 +861,33 @@ export function TransactionModalsScreens() {
               <span>Cancelar compromiso</span>
             </button>
           </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              deleteTransaction(tx.id);
+              setActiveScreen("P10");
+            }}
+            className="w-full py-2.5 px-3 rounded-xl bg-transparent hover:bg-[#FDF2F2] text-xs font-semibold text-[#C94C4C] flex items-center justify-center gap-1.5 transition cursor-pointer"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Eliminar movimiento permanentemente</span>
+          </button>
         </div>
       </div>
     );
   }
 
-  // === P15: Confirmar Pago de Gasto (con vista previa en vivo "Así cambiará tu panorama") ===
+  // === Confirmar Pago de Gasto (con vista previa en vivo "Así cambiará tu panorama") ===
   if (activeScreen === "P15") {
-    const target =
-      selectedTx?.type === "expense"
-        ? selectedTx
-        : transactions.find((t) => t.id === "tx-exp-05") || selectedTx;
-    const estAmount = target?.estimated_amount ?? 650;
-    const realAmount = Number(confirmAmountStr) || 0;
+    const target = selectedTx;
+    const estAmount = target.estimated_amount ?? 0;
+    const realAmount = confirmAmountNum;
     const diff = roundCurrency(realAmount - estAmount);
 
     const newCurrentBalance = roundCurrency(
       monthProjection.currentBalance - realAmount
     );
-    // El saldo proyectado ya restaba estAmount; al pagar realAmount, cambia en -diff
     const newProjectedBalance = roundCurrency(
       (monthProjection.projectedClosingBalance ?? 0) - diff
     );
@@ -885,9 +920,6 @@ export function TransactionModalsScreens() {
           <span className="text-sm font-bold text-[#26332D]">
             Confirmar pago de gasto
           </span>
-          <span className="text-[11px] font-bold text-[#34483D] bg-[#E8DCCB] px-2 py-0.5 rounded-md">
-            P15
-          </span>
         </div>
 
         {/* Resumen del gasto a confirmar */}
@@ -912,19 +944,12 @@ export function TransactionModalsScreens() {
               <label className="block text-xs font-semibold text-[#68736B] mb-1.5">
                 Monto real pagado (MXN)
               </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-lg font-bold text-[#68736B]">
-                  $
-                </span>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={confirmAmountStr}
-                  onChange={(e) => setConfirmAmountStr(e.target.value)}
-                  className="w-full pl-9 pr-4 py-3 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-2xl font-bold tabular-nums text-[#26332D]"
-                />
-              </div>
+              <CurrencyInput
+                value={confirmAmountNum}
+                onChange={(_, num) => setConfirmAmountNum(num)}
+                placeholder="Ej. 650.00"
+                required
+              />
 
               {/* Badge de diferencia contra estimado */}
               <div className="mt-2">
@@ -965,13 +990,13 @@ export function TransactionModalsScreens() {
                 type="text"
                 value={confirmNotes}
                 onChange={(e) => setConfirmNotes(e.target.value)}
-                placeholder="Ej. Pagado con tarjeta de débito terminación 4821"
+                placeholder="Ej. Pagado con tarjeta de débito o transferencia"
                 className="w-full px-3.5 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs text-[#26332D]"
               />
             </div>
           </div>
 
-          {/* Tarjeta "Así cambiará tu panorama" (PRD P15) */}
+          {/* Tarjeta "Así cambiará tu panorama" */}
           <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-2.5">
             <div className="flex items-center gap-1.5 text-xs font-bold text-[#34483D]">
               <Sparkles className="w-4 h-4 text-[#D99A32]" />
@@ -1027,20 +1052,16 @@ export function TransactionModalsScreens() {
     );
   }
 
-  // === P16: Confirmar Recepción de Ingreso (con vista previa en vivo "Así cambiará tu panorama") ===
+  // === Confirmar Recepción de Ingreso (con vista previa en vivo "Así cambiará tu panorama") ===
   if (activeScreen === "P16") {
-    const target =
-      selectedTx?.type === "income"
-        ? selectedTx
-        : transactions.find((t) => t.id === "tx-inc-02") || selectedTx;
-    const estAmount = target?.estimated_amount ?? 3000;
-    const realAmount = Number(confirmAmountStr) || 0;
+    const target = selectedTx;
+    const estAmount = target.estimated_amount ?? 0;
+    const realAmount = confirmAmountNum;
     const wasDelayed = isIncomeDelayed(target, referenceDate);
 
     const newCurrentBalance = roundCurrency(
       monthProjection.currentBalance + realAmount
     );
-    // Si era un ingreso atrasado (como Proyecto freelance $3,000 del 16/11), estaba excluido del proyectado; al confirmarse ahora sí se suma completo al proyectado
     const newProjectedBalance = wasDelayed
       ? roundCurrency(
           (monthProjection.projectedClosingBalance ?? 0) + realAmount
@@ -1075,9 +1096,6 @@ export function TransactionModalsScreens() {
           <span className="text-sm font-bold text-[#26332D]">
             Confirmar recepción de ingreso
           </span>
-          <span className="text-[11px] font-bold text-[#23845B] bg-[#EDF7F2] px-2 py-0.5 rounded-md">
-            P16
-          </span>
         </div>
 
         <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE]">
@@ -1094,7 +1112,10 @@ export function TransactionModalsScreens() {
           <div className="text-xs text-[#68736B] mt-1">
             Fecha esperada: {formatDateDDMMYYYY(target.expected_date)} • Monto esperado:{" "}
             <strong className="tabular-nums text-[#23845B]">
-              +{formatMXN(estAmount, { approximate: target.amount_type === "variable" })}
+              +
+              {formatMXN(estAmount, {
+                approximate: target.amount_type === "variable",
+              })}
             </strong>
           </div>
         </div>
@@ -1115,19 +1136,14 @@ export function TransactionModalsScreens() {
               <label className="block text-xs font-semibold text-[#68736B] mb-1.5">
                 Monto real recibido (MXN)
               </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-lg font-bold text-[#23845B]">
-                  +$
-                </span>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={confirmAmountStr}
-                  onChange={(e) => setConfirmAmountStr(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-2xl font-bold tabular-nums text-[#23845B]"
-                />
-              </div>
+              <CurrencyInput
+                value={confirmAmountNum}
+                onChange={(_, num) => setConfirmAmountNum(num)}
+                prefix="+$"
+                placeholder="Ej. 3,000.00"
+                required
+                inputClassName="w-full pl-11 pr-4 py-3 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-2xl font-bold tabular-nums text-[#23845B]"
+              />
             </div>
 
             <div>
@@ -1197,19 +1213,20 @@ export function TransactionModalsScreens() {
     );
   }
 
-  // === P17: Alcance de Edición Recurrente (PRD 4.4) ===
-  const target =
-    selectedTx?.recurrence_rule_id
-      ? selectedTx
-      : transactions.find((t) => t.id === "tx-exp-07") || selectedTx;
+  // === Editar Movimiento y Alcance de Edición Recurrente ===
+  const target = selectedTx;
 
   const handleApplyScope = (e: React.FormEvent) => {
     e.preventDefault();
     updateTransaction(
       target.id,
       {
-        title: scopeTitleStr,
-        estimated_amount: Number(scopeAmountStr) || target.estimated_amount,
+        title: scopeTitleStr.trim() || target.title,
+        estimated_amount: scopeAmountNum,
+        actual_amount:
+          target.status === "paid" || target.status === "received"
+            ? scopeAmountNum
+            : target.actual_amount,
       },
       scopeChoice
     );
@@ -1228,19 +1245,18 @@ export function TransactionModalsScreens() {
           <span>Cancelar</span>
         </button>
         <span className="text-sm font-bold text-[#26332D]">
-          Alcance de edición recurrente
-        </span>
-        <span className="text-[11px] font-bold text-[#34483D] bg-[#E8DCCB] px-2 py-0.5 rounded-md">
-          P17
+          {target.recurrence_rule_id
+            ? "Editar compromiso recurrente"
+            : "Editar movimiento"}
         </span>
       </div>
 
       <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-3">
         <div className="flex items-center gap-2 text-xs text-[#34483D] font-bold">
           <Repeat className="w-4 h-4" />
-          <span>Editando compromiso periódico: {target.title}</span>
+          <span>Editando: {target.title}</span>
         </div>
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="space-y-3">
           <div>
             <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
               Concepto
@@ -1249,94 +1265,97 @@ export function TransactionModalsScreens() {
               type="text"
               value={scopeTitleStr}
               onChange={(e) => setScopeTitleStr(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-semibold text-[#26332D]"
+              placeholder="Ej. Netflix estándar"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-sm font-semibold text-[#26332D]"
             />
           </div>
           <div>
             <label className="block text-[11px] font-semibold text-[#68736B] mb-1">
-              Nuevo monto (MXN)
+              Monto (MXN)
             </label>
-            <input
-              type="number"
-              step="0.01"
-              value={scopeAmountStr}
-              onChange={(e) => setScopeAmountStr(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-bold tabular-nums text-[#26332D]"
+            <CurrencyInput
+              value={scopeAmountNum}
+              onChange={(_, num) => setScopeAmountNum(num)}
+              placeholder="Ej. 249.00"
             />
           </div>
         </div>
       </div>
 
       <form onSubmit={handleApplyScope} className="space-y-3 flex-1">
-        <div className="text-xs font-bold text-[#26332D]">
-          ¿A qué ocurrencias deseas aplicar este cambio?
-        </div>
+        {target.recurrence_rule_id && (
+          <>
+            <div className="text-xs font-bold text-[#26332D]">
+              ¿A qué ocurrencias deseas aplicar este cambio?
+            </div>
 
-        {(
-          [
-            {
-              id: "single",
-              title: "Solo este pago",
-              desc: `Modifica únicamente la ocurrencia del ${formatDateDDMMYYYY(
-                target.expected_date
-              )} como una excepción puntual. La regla general no cambia.`,
-            },
-            {
-              id: "future",
-              title: "Este y los siguientes",
-              desc: `Actualiza esta ocurrencia (${formatDateDDMMYYYY(
-                target.expected_date
-              )}) y todas las futuras pendientes (ej. Diciembre 2026 en adelante).`,
-            },
-            {
-              id: "all_pending",
-              title: "Todos los pendientes",
-              desc: "Actualiza todas las ocurrencias pendientes o vencidas aún no liquidadas de esta regla.",
-            },
-          ] as const
-        ).map((opt) => {
-          const selected = scopeChoice === opt.id;
-          return (
-            <label
-              key={opt.id}
-              onClick={() => setScopeChoice(opt.id)}
-              className={`block p-4 rounded-2xl border transition cursor-pointer ${
-                selected
-                  ? "bg-[#FFFFFF] border-[#34483D] shadow-xs"
-                  : "bg-[#F0F1EB]/70 border-[#E4E6DE]"
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <input
-                  type="radio"
-                  name="recurrenceScope"
-                  checked={selected}
-                  onChange={() => setScopeChoice(opt.id)}
-                  className="accent-[#34483D]"
-                />
-                <span className="text-sm font-bold text-[#26332D]">
-                  {opt.title}
-                </span>
-              </div>
-              <p className="text-xs text-[#68736B] mt-1.5 pl-6 leading-relaxed">
-                {opt.desc}
-              </p>
-            </label>
-          );
-        })}
+            {(
+              [
+                {
+                  id: "single",
+                  title: "Solo este movimiento",
+                  desc: `Modifica únicamente la ocurrencia del ${formatDateDDMMYYYY(
+                    target.expected_date
+                  )} como una excepción puntual. La regla general no cambia.`,
+                },
+                {
+                  id: "future",
+                  title: "Este y los siguientes",
+                  desc: `Actualiza esta ocurrencia (${formatDateDDMMYYYY(
+                    target.expected_date
+                  )}) y todas las futuras pendientes de la serie.`,
+                },
+                {
+                  id: "all_pending",
+                  title: "Todos los pendientes",
+                  desc: "Actualiza todas las ocurrencias pendientes o vencidas aún no liquidadas de esta regla.",
+                },
+              ] as const
+            ).map((opt) => {
+              const selected = scopeChoice === opt.id;
+              return (
+                <label
+                  key={opt.id}
+                  onClick={() => setScopeChoice(opt.id)}
+                  className={`block p-4 rounded-2xl border transition cursor-pointer ${
+                    selected
+                      ? "bg-[#FFFFFF] border-[#34483D] shadow-xs"
+                      : "bg-[#F0F1EB]/70 border-[#E4E6DE]"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <input
+                      type="radio"
+                      name="recurrenceScope"
+                      checked={selected}
+                      onChange={() => setScopeChoice(opt.id)}
+                      className="accent-[#34483D]"
+                    />
+                    <span className="text-sm font-bold text-[#26332D]">
+                      {opt.title}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#68736B] mt-1.5 pl-6 leading-relaxed">
+                    {opt.desc}
+                  </p>
+                </label>
+              );
+            })}
 
-        <div className="p-3.5 rounded-2xl bg-[#F0F5FA] border border-[#CFE0EE] flex items-start gap-2.5 text-xs text-[#26332D]">
-          <ShieldAlert className="w-4 h-4 text-[#527A9A] shrink-0 mt-0.5" />
-          <span>
-            <strong>Protección de historial:</strong> Los pagos o ingresos que ya fueron confirmados como liquidados en el pasado nunca se alteran con cambios masivos.
-          </span>
-        </div>
+            <div className="p-3.5 rounded-2xl bg-[#F0F5FA] border border-[#CFE0EE] flex items-start gap-2.5 text-xs text-[#26332D]">
+              <ShieldAlert className="w-4 h-4 text-[#527A9A] shrink-0 mt-0.5" />
+              <span>
+                <strong>Protección de historial:</strong> Los pagos o ingresos que ya fueron confirmados como liquidados en el pasado nunca se alteran con cambios masivos.
+              </span>
+            </div>
+          </>
+        )}
 
         <button
           type="submit"
           className="w-full py-3.5 px-4 rounded-xl bg-[#34483D] hover:bg-[#26332D] text-white font-semibold text-sm transition cursor-pointer"
         >
-          Aplicar cambio con este alcance
+          Guardar cambios
         </button>
       </form>
     </div>
