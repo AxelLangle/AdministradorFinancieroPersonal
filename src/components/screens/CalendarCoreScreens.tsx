@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useFinanceStore } from "@/lib/store/finance-store";
 import {
+  appearsOnCalendarDate,
   formatDateDDMMYYYY,
   formatMonthYearEs,
   formatMXN,
@@ -24,6 +25,7 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
+  Check,
   CheckCircle2,
   Clock,
   ChevronUp,
@@ -274,11 +276,17 @@ export function CalendarCoreScreens() {
     );
   }
 
-  // Filtrar transacciones del mes actual para alertas dinámicas
+  // Filtrar transacciones del mes actual para alertas dinámicas y visibilidad en calendario
   const monthTransactions = transactions.filter((tx) => {
     if (tx.status === "cancelled") return false;
-    const d = getEffectiveDate(tx);
-    return d >= startDate && d <= endDate;
+    const eff = getEffectiveDate(tx);
+    const exp = tx.expected_date.slice(0, 10);
+    const inEffMonth = eff >= startDate && eff <= endDate;
+    const inExpMonthIfSettled =
+      (tx.status === "paid" || tx.status === "received") &&
+      exp >= startDate &&
+      exp <= endDate;
+    return inEffMonth || inExpMonthIfSettled;
   });
 
   const overdueExpensesList = monthTransactions.filter((tx) =>
@@ -291,14 +299,17 @@ export function CalendarCoreScreens() {
     (tx) => tx.status === "pending" && isUnquantifiedExpense(tx)
   );
 
-  const dayTransactionsForSelectedDate = transactions.filter(
-    (tx) =>
-      tx.status !== "cancelled" && getEffectiveDate(tx) === selectedDate
+  const dayTransactionsForSelectedDate = transactions.filter((tx) =>
+    appearsOnCalendarDate(tx, selectedDate)
   );
 
   const upcomingCommitments = monthTransactions
     .filter((tx) => tx.status !== "paid" && tx.status !== "received")
     .sort((a, b) => a.expected_date.localeCompare(b.expected_date));
+
+  const settledMonthTransactions = monthTransactions
+    .filter((tx) => tx.status === "paid" || tx.status === "received")
+    .sort((a, b) => getEffectiveDate(b).localeCompare(getEffectiveDate(a)));
 
   const trafficBadge =
     monthProjection.balanceTrafficLight === "green"
@@ -692,9 +703,8 @@ export function CalendarCoreScreens() {
               const isToday = dateStr === referenceDate;
               const isSelected = dateStr === selectedDate;
 
-              const dayTxs = transactions.filter(
-                (t) =>
-                  t.status !== "cancelled" && getEffectiveDate(t) === dateStr
+              const dayTxs = transactions.filter((t) =>
+                appearsOnCalendarDate(t, dateStr)
               );
 
               const hasOverdue = dayTxs.some((t) =>
@@ -706,6 +716,11 @@ export function CalendarCoreScreens() {
               const hasUnquantified = dayTxs.some((t) =>
                 isUnquantifiedExpense(t)
               );
+              const allSettled =
+                dayTxs.length > 0 &&
+                dayTxs.every(
+                  (t) => t.status === "paid" || t.status === "received"
+                );
               const hasIncome = dayTxs.some((t) => t.type === "income");
               const expensePriorities = dayTxs
                 .filter((t) => t.type === "expense")
@@ -728,6 +743,8 @@ export function CalendarCoreScreens() {
                       ? "bg-[#FDF2F2] text-[#C94C4C] border-[#F5CACA]"
                       : hasUnquantified
                       ? "bg-[#FEF6E7] text-[#9A6712] border-[#F5DFA8]"
+                      : allSettled
+                      ? "bg-[#EDF7F2]/80 hover:bg-[#EDF7F2] text-[#26332D] border-[#C6E7D6]"
                       : "bg-[#F6F5F0]/60 hover:bg-[#F0F1EB] text-[#26332D] border-transparent"
                   }`}
                 >
@@ -754,6 +771,14 @@ export function CalendarCoreScreens() {
                       <span className="w-3.5 h-3.5 rounded-full bg-[#D99A32] text-white text-[9px] font-bold flex items-center justify-center">
                         ?
                       </span>
+                    )}
+                    {allSettled && !hasUnquantified && !isToday && (
+                      <Check
+                        aria-label="Confirmado"
+                        className={`w-3 h-3 ${
+                          isSelected ? "text-white" : "text-[#23845B]"
+                        }`}
+                      />
                     )}
                   </div>
 
@@ -791,7 +816,7 @@ export function CalendarCoreScreens() {
 
           {/* Leyenda de Geometrías de Prioridad */}
           <div className="mt-3 pt-2.5 border-t border-[#E4E6DE] flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#68736B]">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <span className="inline-flex items-center gap-1">
                 <PriorityGeometryIcon priority="essential" size="xs" />
                 <span>Esencial</span>
@@ -805,10 +830,16 @@ export function CalendarCoreScreens() {
                 <span>Flexible</span>
               </span>
             </div>
-            <span className="inline-flex items-center gap-1 text-[#23845B] font-medium">
-              <span className="w-2 h-2 rounded-full bg-[#23845B]" />
-              <span>Ingreso</span>
-            </span>
+            <div className="flex items-center gap-2.5">
+              <span className="inline-flex items-center gap-1 text-[#23845B] font-medium">
+                <span className="w-2 h-2 rounded-full bg-[#23845B]" />
+                <span>Ingreso</span>
+              </span>
+              <span className="inline-flex items-center gap-1 text-[#23845B] font-medium">
+                <Check className="w-3 h-3" />
+                <span>Liquidado</span>
+              </span>
+            </div>
           </div>
         </section>
 
@@ -851,120 +882,197 @@ export function CalendarCoreScreens() {
             </button>
           </section>
         ) : (
-          /* Lista de Próximos Compromisos y Pendientes del Mes */
-          <section aria-label="Próximos compromisos" className="space-y-2.5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-[#26332D]">
-                Compromisos por resolver ({upcomingCommitments.length})
-              </h2>
-              <button
-                type="button"
-                onClick={() => setActiveScreen("P18")}
-                className="text-xs font-semibold text-[#34483D] hover:underline cursor-pointer"
-              >
-                Ver historial completo
-              </button>
-            </div>
-
-            {upcomingCommitments.length === 0 ? (
-              <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] text-center text-xs text-[#68736B]">
-                ¡Excelente! No tienes pagos ni cobros pendientes por confirmar en este mes.
+          <div className="space-y-5">
+            {/* Lista de Próximos Compromisos por Resolver */}
+            <section aria-label="Por pagar o cobrar" className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-bold text-[#26332D]">
+                  Por pagar o cobrar ({upcomingCommitments.length})
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setActiveScreen("P18")}
+                  className="text-xs font-semibold text-[#34483D] hover:underline cursor-pointer"
+                >
+                  Ver historial completo
+                </button>
               </div>
-            ) : (
-              <div className="space-y-2">
-                {upcomingCommitments.map((tx) => {
-                  const overdue = isExpenseOverdue(tx, referenceDate);
-                  const delayed = isIncomeDelayed(tx, referenceDate);
-                  const unquantified = isUnquantifiedExpense(tx);
 
-                  return (
-                    <div
-                      key={tx.id}
-                      onClick={() => {
-                        setSelectedTransactionId(tx.id);
-                        setActiveScreen("P14");
-                      }}
-                      className="bg-[#FFFFFF] rounded-2xl p-3.5 border border-[#E4E6DE] hover:border-[#91A68C] transition flex items-center justify-between gap-3 cursor-pointer"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-bold text-[#26332D] truncate">
-                            {tx.title}
-                          </span>
-                          {tx.type === "expense" && (
-                            <PriorityBadge priority={tx.priority} compact />
-                          )}
-                          <StatusBadge
-                            status={tx.status}
-                            isOverdueExpense={overdue}
-                            isDelayedIncome={delayed}
-                            compact
-                          />
+              {upcomingCommitments.length === 0 ? (
+                <div className="bg-[#FFFFFF] rounded-2xl p-3.5 border border-[#E4E6DE] text-center text-xs text-[#68736B]">
+                  ¡Al día! No tienes pagos ni cobros pendientes por confirmar en este mes.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {upcomingCommitments.map((tx) => {
+                    const overdue = isExpenseOverdue(tx, referenceDate);
+                    const delayed = isIncomeDelayed(tx, referenceDate);
+                    const unquantified = isUnquantifiedExpense(tx);
+
+                    return (
+                      <div
+                        key={tx.id}
+                        onClick={() => {
+                          setSelectedTransactionId(tx.id);
+                          setActiveScreen("P14");
+                        }}
+                        className="bg-[#FFFFFF] rounded-2xl p-3.5 border border-[#E4E6DE] hover:border-[#91A68C] transition flex items-center justify-between gap-3 cursor-pointer"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-bold text-[#26332D] truncate">
+                              {tx.title}
+                            </span>
+                            {tx.type === "expense" && (
+                              <PriorityBadge priority={tx.priority} compact />
+                            )}
+                            <StatusBadge
+                              status={tx.status}
+                              isOverdueExpense={overdue}
+                              isDelayedIncome={delayed}
+                              compact
+                            />
+                          </div>
+                          <div className="text-xs text-[#68736B] mt-1 flex items-center gap-2">
+                            <span>{formatShortDateEs(tx.expected_date)}</span>
+                            <span>•</span>
+                            <span>{getCategoryName(tx.category_id)}</span>
+                          </div>
                         </div>
-                        <div className="text-xs text-[#68736B] mt-1 flex items-center gap-2">
-                          <span>{formatShortDateEs(tx.expected_date)}</span>
-                          <span>•</span>
-                          <span>{getCategoryName(tx.category_id)}</span>
+
+                        <div className="flex flex-col items-end gap-1.5 shrink-0">
+                          <span
+                            className={`text-sm font-bold tabular-nums ${
+                              unquantified
+                                ? "text-[#9A6712]"
+                                : tx.type === "income"
+                                ? "text-[#23845B]"
+                                : overdue
+                                ? "text-[#C94C4C]"
+                                : "text-[#26332D]"
+                            }`}
+                          >
+                            {unquantified
+                              ? "Monto por definir"
+                              : formatMXN(getEffectiveAmount(tx), {
+                                  showPrefix: false,
+                                  showPlusSign: tx.type === "income",
+                                  showMinusSign: tx.type === "expense",
+                                  approximate: tx.amount_type === "variable",
+                                })}
+                          </span>
+
+                          <div
+                            className="flex items-center gap-1.5"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {tx.type === "expense" ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedTransactionId(tx.id);
+                                  setActiveScreen("P15");
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-[#34483D] hover:bg-[#26332D] text-white text-[11px] font-semibold cursor-pointer"
+                              >
+                                Confirmar pago
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedTransactionId(tx.id);
+                                  setActiveScreen("P16");
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-[#23845B] hover:bg-[#1D6E4B] text-white text-[11px] font-semibold cursor-pointer"
+                              >
+                                Confirmar cobro
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
 
-                      <div className="flex flex-col items-end gap-1.5 shrink-0">
+            {/* Confirmados del Mes (Pagados y Recibidos permanecen visibles en el Calendario) */}
+            {settledMonthTransactions.length > 0 && (
+              <section
+                aria-label="Confirmados en el mes"
+                className="space-y-2.5"
+              >
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-bold text-[#26332D]">
+                    Confirmados este mes ({settledMonthTransactions.length})
+                  </h2>
+                  <span className="text-[11px] text-[#23845B] font-semibold">
+                    Pagados y recibidos
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {settledMonthTransactions.map((tx) => {
+                    const effectiveDate = getEffectiveDate(tx);
+                    const differedDate =
+                      tx.expected_date.slice(0, 10) !== effectiveDate;
+
+                    return (
+                      <div
+                        key={tx.id}
+                        onClick={() => {
+                          setSelectedTransactionId(tx.id);
+                          setActiveScreen("P14");
+                        }}
+                        className="bg-[#FFFFFF] rounded-2xl p-3.5 border border-[#C6E7D6]/80 hover:border-[#23845B] transition flex items-center justify-between gap-3 cursor-pointer"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-bold text-[#26332D] truncate">
+                              {tx.title}
+                            </span>
+                            {tx.type === "expense" && (
+                              <PriorityBadge priority={tx.priority} compact />
+                            )}
+                            <StatusBadge status={tx.status} compact />
+                          </div>
+                          <div className="text-xs text-[#68736B] mt-1 flex items-center gap-1.5 flex-wrap">
+                            <span>
+                              {tx.type === "income" ? "Cobrado" : "Pagado"}{" "}
+                              {formatShortDateEs(effectiveDate)}
+                            </span>
+                            {differedDate && (
+                              <span className="text-[11px] opacity-85">
+                                (prog. {formatShortDateEs(tx.expected_date)})
+                              </span>
+                            )}
+                            <span>•</span>
+                            <span>{getCategoryName(tx.category_id)}</span>
+                          </div>
+                        </div>
+
                         <span
-                          className={`text-sm font-bold tabular-nums ${
-                            unquantified
-                              ? "text-[#9A6712]"
-                              : tx.type === "income"
+                          className={`text-sm font-bold tabular-nums shrink-0 ${
+                            tx.type === "income"
                               ? "text-[#23845B]"
-                              : overdue
-                              ? "text-[#C94C4C]"
                               : "text-[#26332D]"
                           }`}
                         >
-                          {unquantified
-                            ? "Monto por definir"
-                            : formatMXN(getEffectiveAmount(tx), {
-                                showPrefix: false,
-                                showPlusSign: tx.type === "income",
-                                showMinusSign: tx.type === "expense",
-                                approximate: tx.amount_type === "variable",
-                              })}
+                          {formatMXN(getEffectiveAmount(tx), {
+                            showPrefix: false,
+                            showPlusSign: tx.type === "income",
+                            showMinusSign: tx.type === "expense",
+                          })}
                         </span>
-
-                        <div
-                          className="flex items-center gap-1.5"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {tx.type === "expense" ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedTransactionId(tx.id);
-                                setActiveScreen("P15");
-                              }}
-                              className="px-2.5 py-1 rounded-lg bg-[#34483D] hover:bg-[#26332D] text-white text-[11px] font-semibold cursor-pointer"
-                            >
-                              Confirmar pago
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedTransactionId(tx.id);
-                                setActiveScreen("P16");
-                              }}
-                              className="px-2.5 py-1 rounded-lg bg-[#23845B] hover:bg-[#1D6E4B] text-white text-[11px] font-semibold cursor-pointer"
-                            >
-                              Confirmar cobro
-                            </button>
-                          )}
-                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              </section>
             )}
-          </section>
+          </div>
         )}
       </div>
 
@@ -1016,6 +1124,14 @@ export function CalendarCoreScreens() {
                 dayTransactionsForSelectedDate.map((tx) => {
                   const overdue = isExpenseOverdue(tx, referenceDate);
                   const delayed = isIncomeDelayed(tx, referenceDate);
+                  const isSettled =
+                    tx.status === "paid" || tx.status === "received";
+                  const settledDateStr = (
+                    tx.settled_date || tx.expected_date
+                  ).slice(0, 10);
+                  const expectedDateStr = tx.expected_date.slice(0, 10);
+                  const movedDate = settledDateStr !== expectedDateStr;
+
                   return (
                     <div
                       key={tx.id}
@@ -1039,10 +1155,29 @@ export function CalendarCoreScreens() {
                           </div>
                           <div className="text-xs text-[#68736B] mt-1">
                             {getCategoryName(tx.category_id)} •{" "}
-                            {tx.amount_type === "variable"
+                            {tx.amount_type === "variable" && !isSettled
                               ? "Monto variable (~)"
                               : "Monto fijo"}
                           </div>
+                          {isSettled && (
+                            <div className="text-[11px] font-medium text-[#23845B] mt-1">
+                              {movedDate
+                                ? selectedDate === expectedDateStr
+                                  ? `Programado este día • ${
+                                      tx.type === "income" ? "Cobrado" : "Pagado"
+                                    } el ${formatDateDDMMYYYY(settledDateStr)}`
+                                  : `${
+                                      tx.type === "income" ? "Cobrado" : "Pagado"
+                                    } el ${formatDateDDMMYYYY(
+                                      settledDateStr
+                                    )} (programado ${formatDateDDMMYYYY(
+                                      expectedDateStr
+                                    )})`
+                                : `Confirmado el ${formatDateDDMMYYYY(
+                                    settledDateStr
+                                  )}`}
+                            </div>
+                          )}
                         </div>
 
                         <div className="text-right">
