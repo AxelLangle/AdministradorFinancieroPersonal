@@ -12,9 +12,10 @@ import { CalendarCoreScreens } from "@/components/screens/CalendarCoreScreens";
 import { TransactionModalsScreens } from "@/components/screens/TransactionModalsScreens";
 import { HistoryAndBudgetScreens } from "@/components/screens/HistoryAndBudgetScreens";
 import { ManagementScreens } from "@/components/screens/ManagementScreens";
+import { UserManualScreen } from "@/components/screens/TutorialAndManualModal";
 
 function ScreenRouter() {
-  const { activeScreen } = useFinanceStore();
+  const { activeScreen, isInitializingAuth } = useFinanceStore();
 
   useEffect(() => {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
@@ -23,6 +24,21 @@ function ScreenRouter() {
       });
     }
   }, []);
+
+  if (isInitializingAuth) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3">
+        <div className="w-9 h-9 rounded-full border-3 border-[#34483D] border-t-transparent animate-spin" />
+        <p className="text-xs font-medium text-[#68736B]">
+          Preparando tu espacio financiero...
+        </p>
+      </div>
+    );
+  }
+
+  if (activeScreen === "MANUAL") {
+    return <UserManualScreen />;
+  }
 
   if (["P01", "P02", "P03", "P04"].includes(activeScreen)) {
     return <AccessScreens />;
