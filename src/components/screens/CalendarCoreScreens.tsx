@@ -67,7 +67,7 @@ export function CalendarCoreScreens() {
     nextIncomeStretch,
     notifications,
     showToast,
-    setIsTutorialOpen,
+    openTutorialAtPhase,
   } = useFinanceStore();
 
   const [isSummaryManuallyCollapsed, setIsSummaryManuallyCollapsed] =
@@ -907,7 +907,7 @@ export function CalendarCoreScreens() {
                 <span>Flexible</span>
               </span>
             </div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
               <span className="inline-flex items-center gap-1 text-[#23845B] font-medium">
                 <span className="w-2 h-2 rounded-full bg-[#23845B]" />
                 <span>Ingreso</span>
@@ -916,6 +916,14 @@ export function CalendarCoreScreens() {
                 <Check className="w-3 h-3" />
                 <span>Liquidado</span>
               </span>
+              <button
+                type="button"
+                onClick={() => openTutorialAtPhase(2)}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#F0F1EB] hover:bg-[#E8DCCB] text-[#34483D] font-semibold transition cursor-pointer"
+              >
+                <HelpCircle className="w-3 h-3" />
+                <span>¿Cómo leer?</span>
+              </button>
             </div>
           </div>
         </section>
@@ -952,7 +960,7 @@ export function CalendarCoreScreens() {
             </div>
             <button
               type="button"
-              onClick={() => setIsTutorialOpen(true)}
+              onClick={() => openTutorialAtPhase(1)}
               className="text-xs font-semibold text-[#34483D] underline pt-1 cursor-pointer"
             >
               Ver tutorial rápido de cómo funciona la app
