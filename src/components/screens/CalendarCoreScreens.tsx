@@ -512,14 +512,22 @@ export function CalendarCoreScreens() {
               onClick={() => setActiveScreen("P20")}
               className="pt-1 cursor-pointer group"
             >
-              <div className="flex items-center justify-between text-xs mb-1.5">
-                <span className="font-semibold text-[#26332D] group-hover:text-[#34483D] flex items-center gap-1">
-                  Presupuesto: {budgetSummary.committedPercent}% usado
-                  <ArrowUpRight className="w-3.5 h-3.5 opacity-60" />
+              <div className="flex items-center justify-between gap-2 text-xs mb-1.5">
+                <span className="font-semibold text-[#26332D] group-hover:text-[#34483D] flex items-center gap-1 min-w-0 truncate">
+                  Presupuesto: {budgetSummary.committedPercent}% usado (Límite{" "}
+                  {formatMXN(budgetSummary.totalLimit, { showPrefix: false })})
+                  <ArrowUpRight className="w-3.5 h-3.5 opacity-60 shrink-0" />
                 </span>
-                <span className="font-bold tabular-nums text-[#23845B]">
-                  {formatMXN(budgetSummary.availableBudget)} disp.
-                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveScreen("P21");
+                  }}
+                  className="px-2 py-0.5 rounded-lg bg-[#F0F1EB] hover:bg-[#E8DCCB] text-[#34483D] font-semibold text-[11px] shrink-0 cursor-pointer"
+                >
+                  Cambiar límite
+                </button>
               </div>
               <div className="w-full h-2 rounded-full bg-[#F0F1EB] overflow-hidden flex">
                 <div
