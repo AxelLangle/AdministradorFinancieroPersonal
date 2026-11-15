@@ -42,6 +42,7 @@ export function TransactionModalsScreens() {
   const {
     activeScreen,
     setActiveScreen,
+    goBack,
     selectedDate,
     selectedTransactionId,
     setSelectedTransactionId,
@@ -609,11 +610,11 @@ export function TransactionModalsScreens() {
         <div className="flex items-center justify-between">
           <button
             type="button"
-            onClick={() => setActiveScreen("P10")}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#68736B] hover:text-[#26332D] cursor-pointer"
+            onClick={goBack}
+            className="min-h-[44px] px-2 -ml-2 rounded-xl inline-flex items-center gap-1.5 text-xs font-semibold text-[#68736B] hover:text-[#26332D] cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Volver al calendario</span>
+            <span>Volver</span>
           </button>
           <span className="text-xs font-bold text-[#26332D]">
             Detalle de movimiento
@@ -844,18 +845,18 @@ export function TransactionModalsScreens() {
             <button
               type="button"
               onClick={() => setActiveScreen("P17")}
-              className="py-2.5 px-3 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#26332D] flex items-center justify-center gap-1.5 cursor-pointer"
+              className="min-h-[44px] py-2.5 px-3 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#26332D] flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Edit3 className="w-3.5 h-3.5" />
               <span>Editar concepto o monto</span>
             </button>
             <button
               type="button"
-              onClick={() => {
-                cancelTransaction(tx.id);
-                setActiveScreen("P10");
+              onClick={async () => {
+                await cancelTransaction(tx.id);
+                goBack();
               }}
-              className="py-2.5 px-3 rounded-xl bg-[#FDF2F2] border border-[#F5CACA] text-xs font-semibold text-[#C94C4C] flex items-center justify-center gap-1.5 cursor-pointer"
+              className="min-h-[44px] py-2.5 px-3 rounded-xl bg-[#FDF2F2] border border-[#F5CACA] text-xs font-semibold text-[#C94C4C] flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <XCircle className="w-3.5 h-3.5" />
               <span>Cancelar compromiso</span>
@@ -864,11 +865,11 @@ export function TransactionModalsScreens() {
 
           <button
             type="button"
-            onClick={() => {
-              deleteTransaction(tx.id);
-              setActiveScreen("P10");
+            onClick={async () => {
+              await deleteTransaction(tx.id);
+              goBack();
             }}
-            className="w-full py-2.5 px-3 rounded-xl bg-transparent hover:bg-[#FDF2F2] text-xs font-semibold text-[#C94C4C] flex items-center justify-center gap-1.5 transition cursor-pointer"
+            className="min-h-[44px] w-full py-2.5 px-3 rounded-xl bg-transparent hover:bg-[#FDF2F2] text-xs font-semibold text-[#C94C4C] flex items-center justify-center gap-1.5 transition cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>Eliminar movimiento permanentemente</span>
