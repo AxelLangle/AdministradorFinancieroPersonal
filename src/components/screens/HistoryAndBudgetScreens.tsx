@@ -11,6 +11,7 @@ import {
   formatDateDDMMYYYY,
   formatMonthYearEs,
   formatMXN,
+  formatNumberWithCommas,
   formatShortDateEs,
   getEffectiveAmount,
   getEffectiveDate,
@@ -176,6 +177,7 @@ export function HistoryAndBudgetScreens() {
   const {
     activeScreen,
     setActiveScreen,
+    goBack,
     currentYearMonth,
     goToPreviousMonth,
     goToNextMonth,
@@ -221,7 +223,7 @@ export function HistoryAndBudgetScreens() {
 
   const budgetSheetDrag = useBottomSheetDragToDismiss({
     enabled: activeScreen === "P21",
-    onClose: () => setActiveScreen("P20"),
+    onClose: goBack,
   });
 
   // === Movimientos y Bottom Sheet de Filtros Combinables ===
@@ -716,10 +718,10 @@ export function HistoryAndBudgetScreens() {
   }
 
   // === Presupuesto Mensual y Editar Presupuesto Mensual ===
-  const handleSaveBudget = (e: React.FormEvent) => {
+  const handleSaveBudget = async (e: React.FormEvent) => {
     e.preventDefault();
     const newTotal = limitNum > 0 ? limitNum : 0;
-    updateBudget({
+    await updateBudget({
       total_limit: newTotal,
       alert_threshold_percent: thresholdInput,
       min_cushion_percent: cushionPercentInput,
@@ -727,7 +729,7 @@ export function HistoryAndBudgetScreens() {
         newTotal * (cushionPercentInput / 100)
       ),
     });
-    setActiveScreen("P20");
+    goBack();
   };
 
   const nextIncomeDateLabel = nextIncomeStretch.nextIncomeTransaction
@@ -834,11 +836,25 @@ export function HistoryAndBudgetScreens() {
           </div>
 
           <div className="space-y-1.5 flex-1">
-            <div className="text-xs text-[#68736B]">
-              Límite mensual:{" "}
-              <strong className="text-[#26332D] tabular-nums">
-                {formatMXN(budgetSummary.totalLimit)}
-              </strong>
+            <div className="flex items-center justify-between gap-2 text-xs text-[#68736B]">
+              <span>
+                Límite mensual:{" "}
+                <strong className="text-[#26332D] tabular-nums">
+                  {formatMXN(budgetSummary.totalLimit)}
+                </strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setLimitNum(budget.total_limit);
+                  setThresholdInput(budget.alert_threshold_percent);
+                  setCushionPercentInput(budget.min_cushion_percent);
+                  setActiveScreen("P21");
+                }}
+                className="px-2 py-0.5 rounded-lg bg-[#F0F1EB] hover:bg-[#E8DCCB] text-[#34483D] font-semibold text-[11px] cursor-pointer shrink-0"
+              >
+                Cambiar
+              </button>
             </div>
             <div>
               <div className="text-[11px] text-[#68736B]">
@@ -1071,8 +1087,8 @@ export function HistoryAndBudgetScreens() {
               </div>
               <button
                 type="button"
-                onClick={() => setActiveScreen("P20")}
-                className="p-2 rounded-full bg-[#F0F1EB] text-[#68736B] hover:text-[#26332D] cursor-pointer"
+                onClick={goBack}
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full bg-[#F0F1EB] text-[#68736B] hover:text-[#26332D] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1081,7 +1097,7 @@ export function HistoryAndBudgetScreens() {
             <form onSubmit={handleSaveBudget} className="space-y-4 pt-4">
               <div>
                 <label className="block text-xs font-semibold text-[#68736B] mb-1.5">
-                  Límite total del mes (MXN)
+                  Límite máximo de gasto mensual (MXN)
                 </label>
                 <CurrencyInput
                   value={limitNum}
@@ -1089,6 +1105,22 @@ export function HistoryAndBudgetScreens() {
                   placeholder="Ej. 20,000.00"
                   required
                 />
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {[5000, 10000, 15000, 20000, 30000].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setLimitNum(preset)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border cursor-pointer transition ${
+                        limitNum === preset
+                          ? "bg-[#34483D] text-white border-[#34483D]"
+                          : "bg-[#F0F1EB] text-[#26332D] border-[#E4E6DE] hover:border-[#91A68C]"
+                      }`}
+                    >
+                      ${formatNumberWithCommas(preset, 0)}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div>
@@ -1147,14 +1179,14 @@ export function HistoryAndBudgetScreens() {
               <div className="flex items-center gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setActiveScreen("P20")}
-                  className="py-3 px-4 rounded-xl bg-[#F0F1EB] text-[#26332D] text-xs font-semibold cursor-pointer"
+                  onClick={goBack}
+                  className="min-h-[44px] py-3 px-4 rounded-xl bg-[#F0F1EB] text-[#26332D] text-xs font-semibold cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 px-4 rounded-xl bg-[#34483D] text-white text-xs font-semibold cursor-pointer"
+                  className="min-h-[44px] flex-1 py-3 px-4 rounded-xl bg-[#34483D] text-white text-xs font-semibold cursor-pointer"
                 >
                   Guardar presupuesto
                 </button>
