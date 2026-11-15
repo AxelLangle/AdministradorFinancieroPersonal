@@ -596,6 +596,10 @@ export function HistoryAndBudgetScreens() {
                       );
                     })}
                   </div>
+                  <p className="text-[11px] text-[#68736B] mt-2 leading-relaxed">
+                    <strong>Gastos:</strong> Pendiente (por pagar) → Pagado (liquidado).{" "}
+                    <strong>Ingresos:</strong> Programado (aún no te depositan) → Recibido (el dinero ya entró a tu cuenta).
+                  </p>
                 </div>
 
                 {/* Prioridad */}
