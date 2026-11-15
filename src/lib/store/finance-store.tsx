@@ -204,6 +204,8 @@ interface FinanceStoreContextValue {
   // Tutorial interactivo para nuevos usuarios
   isTutorialOpen: boolean;
   setIsTutorialOpen: (open: boolean) => void;
+  tutorialInitialPhase: number;
+  openTutorialAtPhase: (phase?: number) => void;
 
   // Usuario y Autenticación Multi-usuario en Supabase
   isInitializingAuth: boolean;
@@ -363,6 +365,11 @@ export function FinanceStoreProvider({
 
   const [theme, setThemeState] = useState<ThemeMode>("light");
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
+  const [tutorialInitialPhase, setTutorialInitialPhase] = useState<number>(1);
+  const openTutorialAtPhase = useCallback((phase?: number) => {
+    setTutorialInitialPhase(phase ?? 1);
+    setIsTutorialOpen(true);
+  }, []);
   const [isInitializingAuth, setIsInitializingAuth] = useState(true);
 
   const [user, setUser] = useState({
@@ -1876,7 +1883,7 @@ export function FinanceStoreProvider({
     }
 
     setActiveScreenState("P10");
-    setIsTutorialOpen(true);
+    openTutorialAtPhase(1);
     try {
       if (user.id) {
         localStorage.setItem(`${TUTORIAL_SEEN_PREFIX}${user.id}`, nowIso);
@@ -1895,6 +1902,7 @@ export function FinanceStoreProvider({
     currentYearMonth,
     user.isAuthenticated,
     user.id,
+    openTutorialAtPhase,
     showToast,
   ]);
 
@@ -1924,6 +1932,8 @@ export function FinanceStoreProvider({
       setTheme,
       isTutorialOpen,
       setIsTutorialOpen,
+      tutorialInitialPhase,
+      openTutorialAtPhase,
       isInitializingAuth,
       user,
       workspaceId,
@@ -1993,6 +2003,8 @@ export function FinanceStoreProvider({
       toggleTheme,
       setTheme,
       isTutorialOpen,
+      tutorialInitialPhase,
+      openTutorialAtPhase,
       isInitializingAuth,
       user,
       workspaceId,
