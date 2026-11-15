@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  useBottomSheetDragToDismiss,
+  useHorizontalSwipe,
+} from "@/lib/hooks/useSwipeGesture";
+
 import React, { useState } from "react";
 import { useFinanceStore } from "@/lib/store/finance-store";
 import type { ScreenId } from "@/lib/finance/types";
@@ -37,6 +42,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const {
     activeScreen,
     setActiveScreen,
+    goBack,
     notifications,
     toastMessage,
     theme,
@@ -45,6 +51,55 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   } = useFinanceStore();
 
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+
+  const MAIN_TAB_ORDER = ["P10", "P18", "P20", "P28"] as const;
+  const mainTabIndex = MAIN_TAB_ORDER.indexOf(
+    activeScreen as (typeof MAIN_TAB_ORDER)[number]
+  );
+  const isMainTab = mainTabIndex !== -1;
+  const isSubScreenForBack = [
+    "P12",
+    "P12B",
+    "P13",
+    "P13B",
+    "P14",
+    "P15",
+    "P16",
+    "P17",
+    "P22",
+    "P23",
+    "P24",
+    "P25",
+    "P26",
+    "P27",
+    "P29",
+    "P30",
+    "MANUAL",
+  ].includes(activeScreen);
+
+  const mainSwipeHandlers = useHorizontalSwipe({
+    enabled: isMainTab || isSubScreenForBack,
+    edgeOnly: !isMainTab && isSubScreenForBack,
+    edgeWidth: 56,
+    threshold: 58,
+    onSwipeLeft: () => {
+      if (isMainTab && mainTabIndex < MAIN_TAB_ORDER.length - 1) {
+        setActiveScreen(MAIN_TAB_ORDER[mainTabIndex + 1]);
+      }
+    },
+    onSwipeRight: () => {
+      if (isMainTab && mainTabIndex > 0) {
+        setActiveScreen(MAIN_TAB_ORDER[mainTabIndex - 1]);
+      } else if (!isMainTab && isSubScreenForBack) {
+        goBack();
+      }
+    },
+  });
+
+  const plusSheetDrag = useBottomSheetDragToDismiss({
+    enabled: plusMenuOpen,
+    onClose: () => setPlusMenuOpen(false),
+  });
   const [viewportMode, setViewportMode] = useState<"mobile" | "responsive">(
     "mobile"
   );
@@ -171,7 +226,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Contenido de la vista activa */}
         <main
-          className={`flex-1 flex flex-col ${
+          {...mainSwipeHandlers}
+          className={`flex-1 flex flex-col touch-pan-y ${
             showBottomNav ? "pb-24" : "pb-6"
           }`}
         >
@@ -180,8 +236,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Hoja de acción rápida del botón central "+" */}
         {plusMenuOpen && (
-          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center">
-            <div className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl p-5 border-t border-[#E4E6DE] shadow-2xl">
+          <div
+            onClick={plusSheetDrag.handleBackdropClick}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center"
+          >
+            <div
+              {...plusSheetDrag.sheetTouchHandlers}
+              style={plusSheetDrag.sheetStyle}
+              className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl p-5 border-t border-[#E4E6DE] shadow-2xl"
+            >
+              <div className="w-12 h-1.5 rounded-full bg-[#E4E6DE] mx-auto mb-3" />
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="text-base font-bold text-[#26332D]">
@@ -247,16 +311,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {showBottomNav && (
           <nav
             aria-label="Navegación principal"
-            className={`fixed bottom-0 z-40 w-full bg-[#FFFFFF]/95 backdrop-blur-md border-t border-[#E4E6DE] px-2 pt-1.5 pb-2.5 flex items-center justify-around shadow-[0_-4px_20px_rgba(38,51,45,0.06)] ${
+            className={`fixed bottom-0 z-40 w-full bg-[#FFFFFF]/95 backdrop-blur-md border-t border-[#E4E6DE] px-2 pt-1.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] flex items-center justify-around shadow-[0_-4px_20px_rgba(38,51,45,0.06)] ${
               viewportMode === "mobile" ? "max-w-[430px]" : "max-w-5xl"
             }`}
           >
             <button
               type="button"
               onClick={() => setActiveScreen("P10")}
-              className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition cursor-pointer ${
+              className={`min-h-[48px] min-w-[64px] flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition cursor-pointer ${
                 isCalendarTabActive
-                  ? "text-[#34483D] font-semibold"
+                  ? "text-[#34483D] bg-[#F0F1EB]/80 font-semibold"
                   : "text-[#68736B] hover:text-[#26332D]"
               }`}
             >
@@ -267,9 +331,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               onClick={() => setActiveScreen("P18")}
-              className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition cursor-pointer ${
+              className={`min-h-[48px] min-w-[64px] flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition cursor-pointer ${
                 isMovementsTabActive
-                  ? "text-[#34483D] font-semibold"
+                  ? "text-[#34483D] bg-[#F0F1EB]/80 font-semibold"
                   : "text-[#68736B] hover:text-[#26332D]"
               }`}
             >
@@ -282,7 +346,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 type="button"
                 aria-label="Agregar movimiento"
                 onClick={() => setPlusMenuOpen((prev) => !prev)}
-                className="w-12 h-12 rounded-full bg-[#34483D] hover:bg-[#26332D] text-[#FFFFFF] shadow-lg flex items-center justify-center transition transform active:scale-95 cursor-pointer border-4 border-[#F6F5F0]"
+                className="w-13 h-13 rounded-full bg-[#34483D] hover:bg-[#26332D] text-[#FFFFFF] shadow-lg flex items-center justify-center transition transform active:scale-95 cursor-pointer border-4 border-[#F6F5F0]"
               >
                 <Plus className="w-6 h-6" />
               </button>
@@ -291,9 +355,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               onClick={() => setActiveScreen("P20")}
-              className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition cursor-pointer ${
+              className={`min-h-[48px] min-w-[64px] flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition cursor-pointer ${
                 isBudgetTabActive
-                  ? "text-[#34483D] font-semibold"
+                  ? "text-[#34483D] bg-[#F0F1EB]/80 font-semibold"
                   : "text-[#68736B] hover:text-[#26332D]"
               }`}
             >
@@ -304,16 +368,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               onClick={() => setActiveScreen("P28")}
-              className={`relative flex flex-col items-center justify-center py-1 px-3 rounded-xl transition cursor-pointer ${
+              className={`relative min-h-[48px] min-w-[64px] flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition cursor-pointer ${
                 isMoreTabActive
-                  ? "text-[#34483D] font-semibold"
+                  ? "text-[#34483D] bg-[#F0F1EB]/80 font-semibold"
                   : "text-[#68736B] hover:text-[#26332D]"
               }`}
             >
               <MoreHorizontal className="w-5 h-5" />
               <span className="text-[11px] mt-0.5">Más</span>
               {unreadNotifications > 0 && (
-                <span className="absolute top-1 right-3 w-2 h-2 rounded-full bg-[#C94C4C]" />
+                <span className="absolute top-1.5 right-3.5 w-2 h-2 rounded-full bg-[#C94C4C]" />
               )}
             </button>
           </nav>
