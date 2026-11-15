@@ -36,7 +36,12 @@ import {
   X,
   ArrowUpRight,
   Sparkles,
+  Trash2,
 } from "lucide-react";
+import {
+  useBottomSheetDragToDismiss,
+  useHorizontalSwipe,
+} from "@/lib/hooks/useSwipeGesture";
 
 const WEEKDAYS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
@@ -51,6 +56,7 @@ export function CalendarCoreScreens() {
     selectedDate,
     setSelectedDate,
     setSelectedTransactionId,
+    deleteTransaction,
     transactions,
     categories,
     monthProjection,
@@ -61,6 +67,19 @@ export function CalendarCoreScreens() {
   } = useFinanceStore();
 
   const [isSummaryCollapsed, setIsSummaryCollapsed] = useState(false);
+
+  const calendarSwipeHandlers = useHorizontalSwipe({
+    enabled: activeScreen === "P10",
+    threshold: 44,
+    stopPropagationOnTrigger: true,
+    onSwipeLeft: goToNextMonth,
+    onSwipeRight: goToPreviousMonth,
+  });
+
+  const daySheetDrag = useBottomSheetDragToDismiss({
+    enabled: activeScreen === "P11",
+    onClose: () => setActiveScreen("P10"),
+  });
 
   // Colapso automático de la tarjeta de resumen al hacer scroll hacia abajo
   useEffect(() => {
@@ -315,7 +334,7 @@ export function CalendarCoreScreens() {
               type="button"
               aria-label="Mes anterior"
               onClick={goToPreviousMonth}
-              className="p-1.5 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#26332D] hover:bg-[#F0F1EB] cursor-pointer"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#26332D] hover:bg-[#F0F1EB] cursor-pointer"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -331,7 +350,7 @@ export function CalendarCoreScreens() {
               type="button"
               aria-label="Mes siguiente"
               onClick={goToNextMonth}
-              className="p-1.5 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#26332D] hover:bg-[#F0F1EB] cursor-pointer"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#26332D] hover:bg-[#F0F1EB] cursor-pointer"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -635,6 +654,7 @@ export function CalendarCoreScreens() {
         {/* Cuadrícula del Calendario Mensual (Lunes a Domingo) */}
         <section
           aria-label="Calendario mensual"
+          {...calendarSwipeHandlers}
           className="bg-[#FFFFFF] rounded-2xl p-3.5 border border-[#E4E6DE] shadow-xs"
         >
           {/* Encabezado de días de la semana */}
@@ -942,9 +962,16 @@ export function CalendarCoreScreens() {
 
       {/* Bottom Sheet de Detalle del Día */}
       {activeScreen === "P11" && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center">
-          <div className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl p-5 border-t border-[#E4E6DE] shadow-2xl max-h-[82vh] flex flex-col">
-            <div className="w-10 h-1 rounded-full bg-[#E4E6DE] mx-auto mb-3" />
+        <div
+          onClick={daySheetDrag.handleBackdropClick}
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center"
+        >
+          <div
+            {...daySheetDrag.sheetTouchHandlers}
+            style={daySheetDrag.sheetStyle}
+            className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl p-5 border-t border-[#E4E6DE] shadow-2xl max-h-[82vh] flex flex-col"
+          >
+            <div className="w-12 h-1.5 rounded-full bg-[#E4E6DE] mx-auto mb-3" />
 
             <div className="flex items-center justify-between pb-3 border-b border-[#E4E6DE]">
               <div>
@@ -1064,9 +1091,20 @@ export function CalendarCoreScreens() {
                             setSelectedTransactionId(tx.id);
                             setActiveScreen("P14");
                           }}
-                          className="flex-1 py-2 px-3 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#26332D] text-xs font-semibold cursor-pointer"
+                          className="min-h-[42px] flex-1 py-2 px-3 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#26332D] text-xs font-semibold cursor-pointer"
                         >
                           Ver detalle
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void deleteTransaction(tx.id);
+                          }}
+                          aria-label={`Eliminar ${tx.title}`}
+                          className="min-h-[42px] py-2 px-3 rounded-xl bg-[#FDF2F2] border border-[#F5CACA] text-[#C94C4C] text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Eliminar</span>
                         </button>
                       </div>
                     </div>
