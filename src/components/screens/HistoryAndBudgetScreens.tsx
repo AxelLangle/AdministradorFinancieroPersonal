@@ -1,7 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useFinanceStore } from "@/lib/store/finance-store";
+import {
+  useBottomSheetDragToDismiss,
+  useHorizontalSwipe,
+} from "@/lib/hooks/useSwipeGesture";
 import {
   filterTransactions,
   formatDateDDMMYYYY,
@@ -20,7 +24,11 @@ import {
   StatusBadge,
 } from "@/components/ui/PriorityBadge";
 import { CurrencyInput } from "@/components/ui/CurrencyInput";
-import type { PriorityLevel, TransactionStatus } from "@/lib/finance/types";
+import type {
+  PriorityLevel,
+  Transaction,
+  TransactionStatus,
+} from "@/lib/finance/types";
 import {
   Search,
   SlidersHorizontal,
@@ -32,13 +40,145 @@ import {
   ShieldCheck,
   Wallet,
   Plus,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+
+interface SwipeableMovementRowProps {
+  tx: Transaction;
+  catName: string;
+  overdue: boolean;
+  delayed: boolean;
+  diff: number;
+  isRevealed: boolean;
+  onReveal: () => void;
+  onHide: () => void;
+  onSelect: () => void;
+  onDelete: () => void;
+}
+
+function SwipeableMovementRow({
+  tx,
+  catName,
+  overdue,
+  delayed,
+  diff,
+  isRevealed,
+  onReveal,
+  onHide,
+  onSelect,
+  onDelete,
+}: SwipeableMovementRowProps) {
+  const swipeHandlers = useHorizontalSwipe({
+    threshold: 40,
+    stopPropagationOnTrigger: true,
+    onSwipeLeft: onReveal,
+    onSwipeRight: onHide,
+  });
+
+  return (
+    <div
+      {...swipeHandlers}
+      onClick={() => {
+        if (isRevealed) {
+          onHide();
+          return;
+        }
+        onSelect();
+      }}
+      className={`bg-[#FFFFFF] rounded-2xl p-3.5 border transition flex items-center justify-between gap-2.5 cursor-pointer ${
+        isRevealed
+          ? "border-[#C94C4C]/60 bg-[#FDF5F2]/30"
+          : "border-[#E4E6DE] hover:border-[#91A68C]"
+      }`}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-bold text-[#26332D] truncate">
+            {tx.title}
+          </span>
+          {tx.type === "expense" && (
+            <PriorityBadge priority={tx.priority} compact />
+          )}
+          <StatusBadge
+            status={tx.status}
+            isOverdueExpense={overdue}
+            isDelayedIncome={delayed}
+            compact
+          />
+        </div>
+        <div className="text-xs text-[#68736B] mt-1">
+          {catName}
+          {diff !== 0 && (
+            <span className="ml-2 text-[#23845B] font-semibold">
+              • Est. {formatMXN(tx.estimated_amount)} (
+              {diff < 0
+                ? `${formatMXN(Math.abs(diff), {
+                    showPrefix: false,
+                  })} menos`
+                : `${formatMXN(diff, {
+                    showPrefix: false,
+                  })} más`}
+              )
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 shrink-0">
+        <div className="text-right">
+          <div
+            className={`text-sm font-bold tabular-nums ${
+              tx.type === "income"
+                ? "text-[#23845B]"
+                : overdue
+                ? "text-[#C94C4C]"
+                : "text-[#26332D]"
+            }`}
+          >
+            {formatMXN(getEffectiveAmount(tx), {
+              showPrefix: false,
+              showPlusSign: tx.type === "income",
+              showMinusSign: tx.type === "expense",
+              approximate:
+                tx.amount_type === "variable" &&
+                tx.status !== "paid" &&
+                tx.status !== "received",
+            })}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          data-no-swipe="true"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          title="Eliminar movimiento"
+          aria-label={`Eliminar ${tx.title}`}
+          className={`min-h-[40px] flex items-center justify-center rounded-xl transition cursor-pointer ${
+            isRevealed
+              ? "px-3 bg-[#C94C4C] text-white text-xs font-bold gap-1.5 shadow-xs"
+              : "w-10 text-[#68736B] hover:text-[#C94C4C] hover:bg-[#FDF2F2]"
+          }`}
+        >
+          <Trash2 className="w-4 h-4 shrink-0" />
+          {isRevealed && <span>Eliminar</span>}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function HistoryAndBudgetScreens() {
   const {
     activeScreen,
     setActiveScreen,
     currentYearMonth,
+    goToPreviousMonth,
+    goToNextMonth,
     referenceDate,
     transactions,
     categories,
@@ -46,6 +186,7 @@ export function HistoryAndBudgetScreens() {
     setFilters,
     resetFilters,
     setSelectedTransactionId,
+    deleteTransaction,
     budget,
     updateBudget,
     monthProjection,
@@ -53,7 +194,7 @@ export function HistoryAndBudgetScreens() {
     nextIncomeStretch,
   } = useFinanceStore();
 
-  // Estados para Editar Presupuesto
+  // Estados para Editar Presupuesto y swipe de tarjeta
   const [limitNum, setLimitNum] = useState(budget.total_limit);
   const [thresholdInput, setThresholdInput] = useState(
     budget.alert_threshold_percent
@@ -61,12 +202,40 @@ export function HistoryAndBudgetScreens() {
   const [cushionPercentInput, setCushionPercentInput] = useState(
     budget.min_cushion_percent
   );
+  const [swipedTxId, setSwipedTxId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLimitNum(budget.total_limit);
+    setThresholdInput(budget.alert_threshold_percent);
+    setCushionPercentInput(budget.min_cushion_percent);
+  }, [
+    budget.total_limit,
+    budget.alert_threshold_percent,
+    budget.min_cushion_percent,
+  ]);
+
+  const filterSheetDrag = useBottomSheetDragToDismiss({
+    enabled: activeScreen === "P19",
+    onClose: () => setActiveScreen("P18"),
+  });
+
+  const budgetSheetDrag = useBottomSheetDragToDismiss({
+    enabled: activeScreen === "P21",
+    onClose: () => setActiveScreen("P20"),
+  });
 
   // === Movimientos y Bottom Sheet de Filtros Combinables ===
   if (activeScreen === "P18" || activeScreen === "P19") {
-    const monthTxs = transactions.filter((tx) =>
-      getEffectiveDate(tx).startsWith(currentYearMonth)
+    const monthTxs = transactions.filter(
+      (tx) =>
+        tx.status !== "cancelled" &&
+        getEffectiveDate(tx).startsWith(currentYearMonth)
     );
+    const totalMonthIncome = roundCurrency(
+      monthProjection.receivedIncome + monthProjection.scheduledIncome
+    );
+    const totalMonthExpense = roundCurrency(budgetSummary.committedExpense);
+    const netMonthFlow = roundCurrency(totalMonthIncome - totalMonthExpense);
     const filtered = filterTransactions(
       monthTxs,
       filters,
@@ -120,17 +289,37 @@ export function HistoryAndBudgetScreens() {
 
     return (
       <div className="flex-1 flex flex-col p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#68736B]">
-              Historial y agenda • {formatMonthYearEs(currentYearMonth)}
-            </span>
-            <h1 className="text-xl font-bold text-[#26332D]">Movimientos</h1>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <button
+              type="button"
+              onClick={goToPreviousMonth}
+              aria-label="Mes anterior"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#26332D] hover:bg-[#F0F1EB] cursor-pointer shrink-0"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <div className="min-w-0">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-[#68736B] block truncate">
+                {formatMonthYearEs(currentYearMonth)}
+              </span>
+              <h1 className="text-xl font-bold text-[#26332D] truncate">
+                Movimientos
+              </h1>
+            </div>
+            <button
+              type="button"
+              onClick={goToNextMonth}
+              aria-label="Mes siguiente"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#26332D] hover:bg-[#F0F1EB] cursor-pointer shrink-0"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
           <button
             type="button"
             onClick={() => setActiveScreen("P19")}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#26332D] hover:bg-[#F0F1EB] shadow-2xs cursor-pointer"
+            className="min-h-[44px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#26332D] hover:bg-[#F0F1EB] shadow-2xs cursor-pointer shrink-0"
           >
             <SlidersHorizontal className="w-3.5 h-3.5 text-[#34483D]" />
             <span>Filtros</span>
@@ -140,6 +329,41 @@ export function HistoryAndBudgetScreens() {
               </span>
             )}
           </button>
+        </div>
+
+        {/* Resumen rápido sincronizado del mes (Ingresos, Gastos y Flujo) */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-[#FFFFFF] rounded-xl p-2.5 border border-[#E4E6DE]">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-[#68736B] block">
+              Ingresos
+            </span>
+            <span className="text-xs font-bold tabular-nums text-[#23845B] mt-0.5 block">
+              +{formatMXN(totalMonthIncome, { showPrefix: false })}
+            </span>
+          </div>
+          <div className="bg-[#FFFFFF] rounded-xl p-2.5 border border-[#E4E6DE]">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-[#68736B] block">
+              Gastos
+            </span>
+            <span className="text-xs font-bold tabular-nums text-[#C94C4C] mt-0.5 block">
+              -{formatMXN(totalMonthExpense, { showPrefix: false })}
+            </span>
+          </div>
+          <div className="bg-[#FFFFFF] rounded-xl p-2.5 border border-[#E4E6DE]">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-[#68736B] block">
+              Balance mes
+            </span>
+            <span
+              className={`text-xs font-bold tabular-nums mt-0.5 block ${
+                netMonthFlow >= 0 ? "text-[#23845B]" : "text-[#C94C4C]"
+              }`}
+            >
+              {formatMXN(netMonthFlow, {
+                showPrefix: false,
+                showPlusSign: netMonthFlow > 0,
+              })}
+            </span>
+          </div>
         </div>
 
         {/* Buscador y pestañas rápidas */}
@@ -277,69 +501,28 @@ export function HistoryAndBudgetScreens() {
                       : 0;
 
                   return (
-                    <div
+                    <SwipeableMovementRow
                       key={tx.id}
-                      onClick={() => {
+                      tx={tx}
+                      catName={catName}
+                      overdue={overdue}
+                      delayed={delayed}
+                      diff={diff}
+                      isRevealed={swipedTxId === tx.id}
+                      onReveal={() => setSwipedTxId(tx.id)}
+                      onHide={() =>
+                        setSwipedTxId((cur) => (cur === tx.id ? null : cur))
+                      }
+                      onSelect={() => {
+                        setSwipedTxId(null);
                         setSelectedTransactionId(tx.id);
                         setActiveScreen("P14");
                       }}
-                      className="bg-[#FFFFFF] rounded-2xl p-3.5 border border-[#E4E6DE] hover:border-[#91A68C] transition flex items-center justify-between gap-3 cursor-pointer"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-bold text-[#26332D] truncate">
-                            {tx.title}
-                          </span>
-                          {tx.type === "expense" && (
-                            <PriorityBadge priority={tx.priority} compact />
-                          )}
-                          <StatusBadge
-                            status={tx.status}
-                            isOverdueExpense={overdue}
-                            isDelayedIncome={delayed}
-                            compact
-                          />
-                        </div>
-                        <div className="text-xs text-[#68736B] mt-1">
-                          {catName}
-                          {diff !== 0 && (
-                            <span className="ml-2 text-[#23845B] font-semibold">
-                              • Est. {formatMXN(tx.estimated_amount)} (
-                              {diff < 0
-                                ? `${formatMXN(Math.abs(diff), {
-                                    showPrefix: false,
-                                  })} menos`
-                                : `${formatMXN(diff, {
-                                    showPrefix: false,
-                                  })} más`}
-                              )
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="text-right shrink-0">
-                        <div
-                          className={`text-sm font-bold tabular-nums ${
-                            tx.type === "income"
-                              ? "text-[#23845B]"
-                              : overdue
-                              ? "text-[#C94C4C]"
-                              : "text-[#26332D]"
-                          }`}
-                        >
-                          {formatMXN(getEffectiveAmount(tx), {
-                            showPrefix: false,
-                            showPlusSign: tx.type === "income",
-                            showMinusSign: tx.type === "expense",
-                            approximate:
-                              tx.amount_type === "variable" &&
-                              tx.status !== "paid" &&
-                              tx.status !== "received",
-                          })}
-                        </div>
-                      </div>
-                    </div>
+                      onDelete={() => {
+                        setSwipedTxId(null);
+                        void deleteTransaction(tx.id);
+                      }}
+                    />
                   );
                 })}
               </div>
@@ -349,9 +532,16 @@ export function HistoryAndBudgetScreens() {
 
         {/* Bottom Sheet de Filtros Combinables */}
         {activeScreen === "P19" && (
-          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center">
-            <div className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl p-5 border-t border-[#E4E6DE] shadow-2xl max-h-[85vh] flex flex-col">
-              <div className="w-10 h-1 rounded-full bg-[#E4E6DE] mx-auto mb-3" />
+          <div
+            onClick={filterSheetDrag.handleBackdropClick}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center"
+          >
+            <div
+              {...filterSheetDrag.sheetTouchHandlers}
+              style={filterSheetDrag.sheetStyle}
+              className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl p-5 border-t border-[#E4E6DE] shadow-2xl max-h-[85vh] flex flex-col"
+            >
+              <div className="w-12 h-1.5 rounded-full bg-[#E4E6DE] mx-auto mb-3" />
 
               <div className="flex items-center justify-between pb-3 border-b border-[#E4E6DE]">
                 <div>
@@ -544,16 +734,38 @@ export function HistoryAndBudgetScreens() {
     ? formatShortDateEs(nextIncomeStretch.nextIncomeTransaction.expected_date)
     : "fin de mes";
 
+  const totalMonthIncome = roundCurrency(
+    monthProjection.receivedIncome + monthProjection.scheduledIncome
+  );
+
   return (
     <div className="flex-1 flex flex-col p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-[#68736B]">
-            Control de techo mensual • {formatMonthYearEs(currentYearMonth)}
-          </span>
-          <h1 className="text-xl font-bold text-[#26332D]">
-            Presupuesto mensual
-          </h1>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <button
+            type="button"
+            onClick={goToPreviousMonth}
+            aria-label="Mes anterior"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#26332D] hover:bg-[#F0F1EB] cursor-pointer shrink-0"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <div className="min-w-0">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#68736B] block truncate">
+              {formatMonthYearEs(currentYearMonth)}
+            </span>
+            <h1 className="text-xl font-bold text-[#26332D] truncate">
+              Presupuesto mensual
+            </h1>
+          </div>
+          <button
+            type="button"
+            onClick={goToNextMonth}
+            aria-label="Mes siguiente"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#26332D] hover:bg-[#F0F1EB] cursor-pointer shrink-0"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
         <button
           type="button"
@@ -563,7 +775,7 @@ export function HistoryAndBudgetScreens() {
             setCushionPercentInput(budget.min_cushion_percent);
             setActiveScreen("P21");
           }}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#34483D] hover:bg-[#F0F1EB] cursor-pointer"
+          className="min-h-[44px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#34483D] hover:bg-[#F0F1EB] cursor-pointer shrink-0"
         >
           <Edit3 className="w-3.5 h-3.5" />
           <span>Editar límite</span>
@@ -696,9 +908,31 @@ export function HistoryAndBudgetScreens() {
       <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-3">
         <div className="flex items-center gap-2 text-xs font-bold text-[#26332D]">
           <Wallet className="w-4 h-4 text-[#34483D]" />
-          <span>Comparativa: Dinero en cuenta vs. Presupuesto</span>
+          <span>Comparativa: Dinero en cuenta, ingresos y presupuesto</span>
         </div>
         <div className="grid grid-cols-2 gap-3 text-xs">
+          <div className="p-3 rounded-xl bg-[#EDF7F2]">
+            <span className="text-[#68736B] block">
+              Ingresos del mes
+            </span>
+            <span className="text-base font-bold tabular-nums text-[#23845B] mt-0.5 block">
+              +{formatMXN(totalMonthIncome)}
+            </span>
+            <span className="text-[11px] text-[#68736B]">
+              Recibidos y programados
+            </span>
+          </div>
+          <div className="p-3 rounded-xl bg-[#FDF5F2]">
+            <span className="text-[#68736B] block">
+              Gastos comprometidos
+            </span>
+            <span className="text-base font-bold tabular-nums text-[#C94C4C] mt-0.5 block">
+              -{formatMXN(budgetSummary.committedExpense)}
+            </span>
+            <span className="text-[11px] text-[#68736B]">
+              Pagados y pendientes del mes
+            </span>
+          </div>
           <div className="p-3 rounded-xl bg-[#F6F5F0]">
             <span className="text-[#68736B] block">
               Cierre proyectado en cuenta
@@ -815,9 +1049,16 @@ export function HistoryAndBudgetScreens() {
 
       {/* Bottom Sheet Editar Presupuesto Mensual */}
       {activeScreen === "P21" && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center">
-          <div className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl p-5 border-t border-[#E4E6DE] shadow-2xl">
-            <div className="w-10 h-1 rounded-full bg-[#E4E6DE] mx-auto mb-3" />
+        <div
+          onClick={budgetSheetDrag.handleBackdropClick}
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center"
+        >
+          <div
+            {...budgetSheetDrag.sheetTouchHandlers}
+            style={budgetSheetDrag.sheetStyle}
+            className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl p-5 border-t border-[#E4E6DE] shadow-2xl"
+          >
+            <div className="w-12 h-1.5 rounded-full bg-[#E4E6DE] mx-auto mb-3" />
 
             <div className="flex items-center justify-between pb-3 border-b border-[#E4E6DE]">
               <div>
