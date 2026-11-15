@@ -173,6 +173,24 @@ export function getEffectiveDate(tx: Transaction): string {
   return tx.expected_date.slice(0, 10);
 }
 
+/**
+ * Indica si un movimiento debe mostrarse en la casilla o detalle de un día del calendario.
+ * Cuando se confirma como pagado o recibido en una fecha distinta a la esperada, permanece visible
+ * tanto en la fecha real de liquidación como en su fecha esperada original para que no desaparezca del calendario.
+ */
+export function appearsOnCalendarDate(tx: Transaction, dateStr: string): boolean {
+  if (tx.status === "cancelled") return false;
+  const targetDate = dateStr.slice(0, 10);
+  if (getEffectiveDate(tx) === targetDate) return true;
+  if (
+    (tx.status === "paid" || tx.status === "received") &&
+    tx.expected_date.slice(0, 10) === targetDate
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function getEffectiveAmount(tx: Transaction): number {
   if (tx.status === "cancelled") return 0;
   if (tx.status === "paid" || tx.status === "received") {
