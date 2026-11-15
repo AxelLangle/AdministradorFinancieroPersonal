@@ -311,37 +311,41 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {showBottomNav && (
           <nav
             aria-label="Navegación principal"
-            className={`fixed bottom-0 z-40 w-full bg-[#FFFFFF]/95 backdrop-blur-md border-t border-[#E4E6DE] px-2 pt-1.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] flex items-center justify-around shadow-[0_-4px_20px_rgba(38,51,45,0.06)] ${
+            className={`fixed bottom-0 left-1/2 -translate-x-1/2 z-40 w-full bg-[#FFFFFF]/95 backdrop-blur-md border-t border-[#E4E6DE] px-1.5 pt-1.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] grid grid-cols-5 items-center shadow-[0_-4px_20px_rgba(38,51,45,0.06)] ${
               viewportMode === "mobile" ? "max-w-[430px]" : "max-w-5xl"
             }`}
           >
             <button
               type="button"
               onClick={() => setActiveScreen("P10")}
-              className={`min-h-[48px] min-w-[64px] flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition cursor-pointer ${
+              className={`min-h-[48px] w-full flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition cursor-pointer ${
                 isCalendarTabActive
                   ? "text-[#34483D] bg-[#F0F1EB]/80 font-semibold"
                   : "text-[#68736B] hover:text-[#26332D]"
               }`}
             >
               <Calendar className="w-5 h-5" />
-              <span className="text-[11px] mt-0.5">Calendario</span>
+              <span className="text-[10.5px] leading-tight mt-0.5 whitespace-nowrap">
+                Calendario
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveScreen("P18")}
-              className={`min-h-[48px] min-w-[64px] flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition cursor-pointer ${
+              className={`min-h-[48px] w-full flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition cursor-pointer ${
                 isMovementsTabActive
                   ? "text-[#34483D] bg-[#F0F1EB]/80 font-semibold"
                   : "text-[#68736B] hover:text-[#26332D]"
               }`}
             >
               <ListFilter className="w-5 h-5" />
-              <span className="text-[11px] mt-0.5">Movimientos</span>
+              <span className="text-[10.5px] leading-tight mt-0.5 whitespace-nowrap">
+                Movimientos
+              </span>
             </button>
 
-            <div className="relative -top-3">
+            <div className="relative -top-3 flex items-center justify-center">
               <button
                 type="button"
                 aria-label="Agregar movimiento"
@@ -355,30 +359,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               onClick={() => setActiveScreen("P20")}
-              className={`min-h-[48px] min-w-[64px] flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition cursor-pointer ${
+              className={`min-h-[48px] w-full flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition cursor-pointer ${
                 isBudgetTabActive
                   ? "text-[#34483D] bg-[#F0F1EB]/80 font-semibold"
                   : "text-[#68736B] hover:text-[#26332D]"
               }`}
             >
               <PieChart className="w-5 h-5" />
-              <span className="text-[11px] mt-0.5">Presupuesto</span>
+              <span className="text-[10.5px] leading-tight mt-0.5 whitespace-nowrap">
+                Presupuesto
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveScreen("P28")}
-              className={`relative min-h-[48px] min-w-[64px] flex flex-col items-center justify-center py-1.5 px-3 rounded-2xl transition cursor-pointer ${
+              className={`relative min-h-[48px] w-full flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition cursor-pointer ${
                 isMoreTabActive
                   ? "text-[#34483D] bg-[#F0F1EB]/80 font-semibold"
                   : "text-[#68736B] hover:text-[#26332D]"
               }`}
             >
-              <MoreHorizontal className="w-5 h-5" />
-              <span className="text-[11px] mt-0.5">Más</span>
-              {unreadNotifications > 0 && (
-                <span className="absolute top-1.5 right-3.5 w-2 h-2 rounded-full bg-[#C94C4C]" />
-              )}
+              <div className="relative flex items-center justify-center">
+                <MoreHorizontal className="w-5 h-5" />
+                {unreadNotifications > 0 && (
+                  <span className="absolute -top-0.5 -right-1.5 w-2 h-2 rounded-full bg-[#C94C4C]" />
+                )}
+              </div>
+              <span className="text-[10.5px] leading-tight mt-0.5 whitespace-nowrap">
+                Más
+              </span>
             </button>
           </nav>
         )}
