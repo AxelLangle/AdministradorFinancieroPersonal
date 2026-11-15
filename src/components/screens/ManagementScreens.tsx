@@ -10,8 +10,8 @@ import {
 import {
   PriorityBadge,
   PriorityGeometryIcon,
-  StatusBadge,
 } from "@/components/ui/PriorityBadge";
+import { CurrencyInput } from "@/components/ui/CurrencyInput";
 import type {
   AmountType,
   PriorityLevel,
@@ -28,15 +28,15 @@ import {
   PauseCircle,
   PlayCircle,
   Lock,
-  CheckCircle2,
   ChevronRight,
   Database,
   History,
   LogOut,
-  AlertTriangle,
-  WifiOff,
-  HelpCircle,
-  Calendar,
+  BookOpen,
+  Sparkles,
+  Moon,
+  Sun,
+  Trash2,
 } from "lucide-react";
 
 const FREQ_LABELS: Record<RecurrenceFrequency, string> = {
@@ -66,6 +66,7 @@ export function ManagementScreens() {
     setSelectedRuleId,
     createRecurrenceRule,
     updateRecurrenceRule,
+    deleteRecurrenceRule,
     toggleRecurrenceRuleStatus,
     categories,
     selectedCategoryId,
@@ -78,34 +79,35 @@ export function ManagementScreens() {
     markNotificationAsRead,
     markAllNotificationsAsRead,
     auditLog,
-    resetToSofiaMasterDataset,
+    theme,
+    toggleTheme,
+    setIsTutorialOpen,
+    referenceDate,
   } = useFinanceStore();
 
   const [ruleTab, setRuleTab] = useState<"active" | "paused">("active");
 
-  // Estados para P23 / P24 (Reglas recurrentes)
+  // Estados para Reglas recurrentes
   const [ruleType, setRuleType] = useState<TransactionType>("expense");
-  const [ruleTitle, setRuleTitle] = useState("Membresía Spotify Duo");
-  const [ruleAmount, setRuleAmount] = useState("169.00");
+  const [ruleTitle, setRuleTitle] = useState("");
+  const [ruleAmountNum, setRuleAmountNum] = useState(0);
   const [ruleAmountType, setRuleAmountType] = useState<AmountType>("fixed");
   const [ruleFreq, setRuleFreq] = useState<RecurrenceFrequency>("monthly");
-  const [ruleDay, setRuleDay] = useState("12");
-  const [rulePriority, setRulePriority] = useState<PriorityLevel>("flexible");
-  const [ruleCategoryId, setRuleCategoryId] = useState("cat-suscripciones");
-  const [ruleNotes, setRuleNotes] = useState("Cargo automático mensual");
+  const [ruleDay, setRuleDay] = useState("1");
+  const [rulePriority, setRulePriority] = useState<PriorityLevel>("essential");
+  const [ruleCategoryId, setRuleCategoryId] = useState("");
+  const [ruleNotes, setRuleNotes] = useState("");
 
-  // Estados para P26 / P27 (Categorías)
-  const [catName, setCatName] = useState("Mascotas");
+  // Estados para Categorías
+  const [catName, setCatName] = useState("");
   const [catKind, setCatKind] = useState<"expense" | "income" | "both">(
     "expense"
   );
   const [catPriority, setCatPriority] = useState<PriorityLevel>("important");
   const [catActive, setCatActive] = useState(true);
 
-  // Estados para P29 (Configuración de Saldo Inicial y Corte)
-  const [cfgBalance, setCfgBalance] = useState(
-    String(account.opening_balance)
-  );
+  // Estados para Configuración de Saldo Inicial y Corte
+  const [cfgBalanceNum, setCfgBalanceNum] = useState(account.opening_balance);
   const [cfgDate, setCfgDate] = useState(account.opening_balance_date);
 
   const selectedRule =
@@ -119,40 +121,42 @@ export function ManagementScreens() {
     if (activeScreen === "P24" && selectedRule) {
       setRuleType(selectedRule.type);
       setRuleTitle(selectedRule.title);
-      setRuleAmount(String(selectedRule.default_amount ?? 0));
+      setRuleAmountNum(selectedRule.default_amount ?? 0);
       setRuleAmountType(selectedRule.amount_type);
       setRuleFreq(selectedRule.frequency);
       setRuleDay(String(selectedRule.day_of_month ?? 1));
       setRulePriority(selectedRule.priority);
-      setRuleCategoryId(selectedRule.category_id || "cat-servicios");
+      setRuleCategoryId(
+        selectedRule.category_id || categories[0]?.id || ""
+      );
       setRuleNotes(selectedRule.notes || "");
     } else if (activeScreen === "P23") {
       setRuleType("expense");
-      setRuleTitle("Membresía Spotify Duo");
-      setRuleAmount("169.00");
+      setRuleTitle("");
+      setRuleAmountNum(0);
       setRuleAmountType("fixed");
       setRuleFreq("monthly");
-      setRuleDay("12");
-      setRulePriority("flexible");
-      setRuleCategoryId("cat-suscripciones");
-      setRuleNotes("Cargo mensual recurrente");
+      setRuleDay("1");
+      setRulePriority("essential");
+      setRuleCategoryId(categories[0]?.id || "");
+      setRuleNotes("");
     } else if (activeScreen === "P27" && selectedCat) {
       setCatName(selectedCat.name);
       setCatKind(selectedCat.kind);
       setCatPriority(selectedCat.default_priority);
       setCatActive(selectedCat.is_active);
     } else if (activeScreen === "P26") {
-      setCatName("Mascotas y Veterinaria");
+      setCatName("");
       setCatKind("expense");
       setCatPriority("important");
       setCatActive(true);
     } else if (activeScreen === "P29") {
-      setCfgBalance(String(account.opening_balance));
+      setCfgBalanceNum(account.opening_balance);
       setCfgDate(account.opening_balance_date);
     }
-  }, [activeScreen, selectedRule, selectedCat, account]);
+  }, [activeScreen, selectedRule, selectedCat, account, categories]);
 
-  // === P22: Lista de Reglas Recurrentes (Activas / Pausadas) ===
+  // === Lista de Reglas Recurrentes (Activas / Pausadas) ===
   if (activeScreen === "P22") {
     const shownRules = recurrenceRules.filter((r) => r.status === ruleTab);
     return (
@@ -168,7 +172,7 @@ export function ManagementScreens() {
             </button>
             <div>
               <span className="text-[11px] font-semibold uppercase tracking-wider text-[#68736B]">
-                Compromisos periódicos • P22
+                Compromisos periódicos
               </span>
               <h1 className="text-xl font-bold text-[#26332D]">Recurrentes</h1>
             </div>
@@ -213,71 +217,93 @@ export function ManagementScreens() {
         </div>
 
         <div className="space-y-2.5 flex-1">
-          {shownRules.map((rule) => (
-            <div
-              key={rule.id}
-              onClick={() => {
-                setSelectedRuleId(rule.id);
-                setActiveScreen("P24");
-              }}
-              className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] hover:border-[#91A68C] transition flex items-center justify-between gap-3 cursor-pointer"
-            >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-bold text-[#26332D]">
-                    {rule.title}
-                  </span>
-                  {rule.type === "expense" && (
-                    <PriorityBadge priority={rule.priority} compact />
-                  )}
-                </div>
-                <div className="text-xs text-[#68736B]">
-                  {FREQ_LABELS[rule.frequency]} •{" "}
-                  {rule.frequency === "semimonthly"
-                    ? "Días 15 y fin de mes"
-                    : `Día ${rule.day_of_month} de cada periodo`}
-                </div>
+          {shownRules.length === 0 ? (
+            <div className="bg-[#FFFFFF] rounded-2xl p-6 border border-[#E4E6DE] text-center space-y-2">
+              <div className="text-sm font-bold text-[#26332D]">
+                No tienes reglas {ruleTab === "active" ? "activas" : "pausadas"}
               </div>
-
-              <div className="text-right shrink-0 space-y-1">
-                <div
-                  className={`text-sm font-bold tabular-nums ${
-                    rule.type === "income"
-                      ? "text-[#23845B]"
-                      : "text-[#26332D]"
-                  }`}
-                >
-                  {formatMXN(rule.default_amount, {
-                    showPrefix: false,
-                    showPlusSign: rule.type === "income",
-                    showMinusSign: rule.type === "expense",
-                    approximate: rule.amount_type === "variable",
-                  })}
-                </div>
+              <p className="text-xs text-[#68736B]">
+                Automatiza tus ingresos fijos (nómina) y tus gastos periódicos (renta, luz, internet, suscripciones) para que se programen cada mes.
+              </p>
+              {ruleTab === "active" && (
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleRecurrenceRuleStatus(rule.id);
-                  }}
-                  className="text-[11px] font-semibold text-[#34483D] underline cursor-pointer"
+                  onClick={() => setActiveScreen("P23")}
+                  className="mt-2 px-4 py-2 rounded-xl bg-[#34483D] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                 >
-                  {rule.status === "active" ? "Pausar" : "Reactivar"}
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Crear primera regla recurrente</span>
                 </button>
-              </div>
+              )}
             </div>
-          ))}
+          ) : (
+            shownRules.map((rule) => (
+              <div
+                key={rule.id}
+                onClick={() => {
+                  setSelectedRuleId(rule.id);
+                  setActiveScreen("P24");
+                }}
+                className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] hover:border-[#91A68C] transition flex items-center justify-between gap-3 cursor-pointer"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-bold text-[#26332D]">
+                      {rule.title}
+                    </span>
+                    {rule.type === "expense" && (
+                      <PriorityBadge priority={rule.priority} compact />
+                    )}
+                  </div>
+                  <div className="text-xs text-[#68736B]">
+                    {FREQ_LABELS[rule.frequency]} •{" "}
+                    {rule.frequency === "semimonthly"
+                      ? "Días 15 y fin de mes"
+                      : `Día ${rule.day_of_month} de cada periodo`}
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0 space-y-1">
+                  <div
+                    className={`text-sm font-bold tabular-nums ${
+                      rule.type === "income"
+                        ? "text-[#23845B]"
+                        : "text-[#26332D]"
+                    }`}
+                  >
+                    {formatMXN(rule.default_amount, {
+                      showPrefix: false,
+                      showPlusSign: rule.type === "income",
+                      showMinusSign: rule.type === "expense",
+                      approximate: rule.amount_type === "variable",
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleRecurrenceRuleStatus(rule.id);
+                    }}
+                    className="text-[11px] font-semibold text-[#34483D] underline cursor-pointer"
+                  >
+                    {rule.status === "active" ? "Pausar" : "Reactivar"}
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     );
   }
 
-  // === P23 (Nueva Regla Recurrente) y P24 (Editar Regla Recurrente con Historial Bloqueado) ===
+  // === Nueva Regla Recurrente y Editar Regla Recurrente con Historial Bloqueado ===
   if (activeScreen === "P23" || activeScreen === "P24") {
-    const isEdit = activeScreen === "P24";
-    const ruleOccurrences = isEdit
-      ? transactions.filter((t) => t.recurrence_rule_id === selectedRule.id)
-      : [];
+    const isEdit = activeScreen === "P24" && Boolean(selectedRule);
+    const ruleOccurrences =
+      isEdit && selectedRule
+        ? transactions.filter((t) => t.recurrence_rule_id === selectedRule.id)
+        : [];
     const settledOccurrences = ruleOccurrences.filter(
       (t) => t.status === "paid" || t.status === "received"
     );
@@ -285,37 +311,37 @@ export function ManagementScreens() {
       (t) => t.status !== "paid" && t.status !== "received"
     );
 
-    const handleSaveRule = (e: React.FormEvent) => {
+    const handleSaveRule = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (isEdit) {
-        updateRecurrenceRule(selectedRule.id, {
+      if (isEdit && selectedRule) {
+        await updateRecurrenceRule(selectedRule.id, {
           type: ruleType,
-          title: ruleTitle.trim(),
-          default_amount: Number(ruleAmount) || 0,
+          title: ruleTitle.trim() || selectedRule.title,
+          default_amount: ruleAmountNum,
           amount_type: ruleAmountType,
           frequency: ruleFreq,
           day_of_month: Number(ruleDay) || 1,
           priority: rulePriority,
-          category_id: ruleCategoryId,
+          category_id: ruleCategoryId || null,
           notes: ruleNotes,
         });
       } else {
-        createRecurrenceRule({
+        await createRecurrenceRule({
           type: ruleType,
-          title: ruleTitle.trim() || "Nueva regla",
-          category_id: ruleCategoryId,
+          title: ruleTitle.trim() || "Compromiso recurrente",
+          category_id: ruleCategoryId || null,
           priority: rulePriority,
           amount_type: ruleAmountType,
-          default_amount: Number(ruleAmount) || 0,
+          default_amount: ruleAmountNum,
           frequency: ruleFreq,
           interval_count: 1,
           day_of_month: Number(ruleDay) || 1,
           semimonthly_days: ruleFreq === "semimonthly" ? "15,last" : null,
           day_of_week: null,
-          start_date: "2026-11-01",
+          start_date: referenceDate,
           end_date: null,
           status: "active",
-          notes: ruleNotes,
+          notes: ruleNotes || null,
         });
       }
       setActiveScreen("P22");
@@ -334,9 +360,6 @@ export function ManagementScreens() {
           </button>
           <span className="text-sm font-bold text-[#26332D]">
             {isEdit ? "Editar regla recurrente" : "Nueva regla recurrente"}
-          </span>
-          <span className="text-[11px] font-bold text-[#34483D] bg-[#E8DCCB] px-2 py-0.5 rounded-md">
-            {activeScreen}
           </span>
         </div>
 
@@ -376,25 +399,29 @@ export function ManagementScreens() {
                 required
                 value={ruleTitle}
                 onChange={(e) => setRuleTitle(e.target.value)}
+                placeholder={
+                  ruleType === "income"
+                    ? "Ej. Nómina quincenal, Renta cobrada..."
+                    : "Ej. Renta departamento, Internet, Netflix, Gimnasio..."
+                }
                 className="w-full px-3.5 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-sm font-semibold text-[#26332D]"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-[#68736B] mb-1">
-                  Monto base (MXN)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={ruleAmount}
-                  onChange={(e) => setRuleAmount(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-sm font-bold tabular-nums text-[#26332D]"
-                />
-              </div>
+            <div>
+              <label className="block text-xs font-semibold text-[#68736B] mb-1">
+                Monto base (MXN)
+              </label>
+              <CurrencyInput
+                value={ruleAmountNum}
+                onChange={(_, num) => setRuleAmountNum(num)}
+                prefix={ruleAmountType === "variable" ? "~$" : "$"}
+                placeholder="Ej. 1,200.00"
+                required
+              />
+            </div>
 
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-[#68736B] mb-1">
                   Tipo de monto
@@ -408,6 +435,25 @@ export function ManagementScreens() {
                 >
                   <option value="fixed">Fijo ($ exacto)</option>
                   <option value="variable">Variable (~$ estimado)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#68736B] mb-1">
+                  Categoría
+                </label>
+                <select
+                  value={ruleCategoryId}
+                  onChange={(e) => setRuleCategoryId(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-semibold text-[#26332D]"
+                >
+                  {categories
+                    .filter((c) => c.is_active)
+                    .map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
                 </select>
               </div>
             </div>
@@ -442,6 +488,7 @@ export function ManagementScreens() {
                   max={31}
                   value={ruleDay}
                   onChange={(e) => setRuleDay(e.target.value)}
+                  placeholder="Ej. 15"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-bold tabular-nums text-[#26332D]"
                 />
               </div>
@@ -477,10 +524,23 @@ export function ManagementScreens() {
                 </div>
               </div>
             )}
+
+            <div>
+              <label className="block text-xs font-semibold text-[#68736B] mb-1">
+                Notas (opcional)
+              </label>
+              <input
+                type="text"
+                value={ruleNotes}
+                onChange={(e) => setRuleNotes(e.target.value)}
+                placeholder="Ej. Cargo domiciliado o número de contrato"
+                className="w-full px-3.5 py-2 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs text-[#26332D]"
+              />
+            </div>
           </div>
 
-          {/* En P24 mostramos las próximas ocurrencias pendientes y las ya pagadas bloqueadas con candado */}
-          {isEdit && (
+          {/* En edición mostramos las próximas ocurrencias pendientes y las ya pagadas bloqueadas con candado */}
+          {isEdit && selectedRule && (
             <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-[#68736B]">
@@ -561,12 +621,26 @@ export function ManagementScreens() {
               ? "Guardar cambios en regla recurrente"
               : "Crear regla recurrente"}
           </button>
+
+          {isEdit && selectedRule && (
+            <button
+              type="button"
+              onClick={() => {
+                deleteRecurrenceRule(selectedRule.id);
+                setActiveScreen("P22");
+              }}
+              className="w-full py-2.5 px-4 rounded-xl bg-transparent hover:bg-[#FDF2F2] text-xs font-semibold text-[#C94C4C] flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Eliminar regla recurrente</span>
+            </button>
+          )}
         </form>
       </div>
     );
   }
 
-  // === P25: Categorías (Activas e Inactivas que conservan historial) ===
+  // === Categorías (Activas e Inactivas que conservan historial) ===
   if (activeScreen === "P25") {
     const activeCats = categories.filter((c) => c.is_active);
     const inactiveCats = categories.filter((c) => !c.is_active);
@@ -584,7 +658,7 @@ export function ManagementScreens() {
             </button>
             <div>
               <span className="text-[11px] font-semibold uppercase tracking-wider text-[#68736B]">
-                Clasificación y prioridad • P25
+                Clasificación y prioridad
               </span>
               <h1 className="text-xl font-bold text-[#26332D]">Categorías</h1>
             </div>
@@ -618,7 +692,12 @@ export function ManagementScreens() {
                   {cat.name}
                 </div>
                 <div className="text-[11px] text-[#68736B]">
-                  {cat.kind === "income" ? "Ingreso" : "Gasto"} • Toca para editar
+                  {cat.kind === "income"
+                    ? "Ingreso"
+                    : cat.kind === "both"
+                    ? "Ingreso y Gasto"
+                    : "Gasto"}{" "}
+                  • Toca para editar
                 </div>
               </div>
               <PriorityBadge priority={cat.default_priority} compact />
@@ -645,7 +724,7 @@ export function ManagementScreens() {
                     {cat.name}
                   </div>
                   <div className="text-[11px] text-[#68736B]">
-                    Desactivada lógicamente • Sus movimientos pasados se conservan
+                    Desactivada • Sus movimientos pasados se conservan
                   </div>
                 </div>
                 <span className="text-xs font-semibold text-[#34483D] underline">
@@ -659,14 +738,14 @@ export function ManagementScreens() {
     );
   }
 
-  // === P26 (Nueva Categoría) y P27 (Editar Categoría con Desactivación Lógica) ===
+  // === Nueva Categoría y Editar Categoría ===
   if (activeScreen === "P26" || activeScreen === "P27") {
-    const isEdit = activeScreen === "P27";
+    const isEdit = activeScreen === "P27" && Boolean(selectedCat);
     const handleSaveCat = (e: React.FormEvent) => {
       e.preventDefault();
-      if (isEdit) {
+      if (isEdit && selectedCat) {
         updateCategory(selectedCat.id, {
-          name: catName.trim(),
+          name: catName.trim() || selectedCat.name,
           kind: catKind,
           default_priority: catPriority,
           is_active: catActive,
@@ -698,9 +777,6 @@ export function ManagementScreens() {
           <span className="text-sm font-bold text-[#26332D]">
             {isEdit ? "Editar categoría" : "Nueva categoría"}
           </span>
-          <span className="text-[11px] font-bold text-[#34483D] bg-[#E8DCCB] px-2 py-0.5 rounded-md">
-            {activeScreen}
-          </span>
         </div>
 
         <form onSubmit={handleSaveCat} className="space-y-4 flex-1">
@@ -714,6 +790,7 @@ export function ManagementScreens() {
                 required
                 value={catName}
                 onChange={(e) => setCatName(e.target.value)}
+                placeholder="Ej. Mascotas, Educación, Viajes..."
                 className="w-full px-3.5 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-sm font-semibold text-[#26332D]"
               />
             </div>
@@ -782,7 +859,7 @@ export function ManagementScreens() {
                     Categoría activa para nuevos registros
                   </div>
                   <div className="text-[11px] text-[#68736B]">
-                    Si la desactivas, no se borran tus movimientos históricos (desactivación lógica).
+                    Si la desactivas, no se borran tus movimientos históricos.
                   </div>
                 </div>
                 <input
@@ -806,11 +883,11 @@ export function ManagementScreens() {
     );
   }
 
-  // === P29: Configuración (Saldo Inicial, Fecha de Corte y Bitácora Audit Log) ===
+  // === Configuración (Saldo Inicial, Fecha de Corte y Bitácora) ===
   if (activeScreen === "P29") {
     const handleSaveConfig = (e: React.FormEvent) => {
       e.preventDefault();
-      updateAccountOpeningBalance(Number(cfgBalance) || 0, cfgDate);
+      updateAccountOpeningBalance(cfgBalanceNum, cfgDate);
     };
 
     return (
@@ -825,10 +902,7 @@ export function ManagementScreens() {
             <span>Volver a Más</span>
           </button>
           <span className="text-sm font-bold text-[#26332D]">
-            Configuración
-          </span>
-          <span className="text-[11px] font-bold text-[#34483D] bg-[#E8DCCB] px-2 py-0.5 rounded-md">
-            P29
+            Configuración de cuenta
           </span>
         </div>
 
@@ -842,12 +916,10 @@ export function ManagementScreens() {
               <label className="block text-xs font-semibold text-[#68736B] mb-1">
                 Saldo inicial verificado (MXN)
               </label>
-              <input
-                type="number"
-                step="0.01"
-                value={cfgBalance}
-                onChange={(e) => setCfgBalance(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-base font-bold tabular-nums text-[#26332D]"
+              <CurrencyInput
+                value={cfgBalanceNum}
+                onChange={(_, num) => setCfgBalanceNum(num)}
+                placeholder="Ej. 6,480.50"
               />
             </div>
 
@@ -879,7 +951,7 @@ export function ManagementScreens() {
         {/* Preferencias Regionales */}
         <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-2.5 text-xs">
           <h2 className="font-bold uppercase tracking-wider text-[#68736B]">
-            Preferencias regionales (PRD 1.1.2)
+            Preferencias regionales
           </h2>
           <div className="flex justify-between py-1 border-b border-[#E4E6DE]">
             <span className="text-[#68736B]">Moneda predeterminada</span>
@@ -895,39 +967,47 @@ export function ManagementScreens() {
           </div>
         </div>
 
-        {/* Bitácora de Auditoría (audit_log) */}
+        {/* Bitácora de Auditoría */}
         <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-2.5">
           <div className="flex items-center gap-2 text-xs font-bold text-[#26332D]">
             <History className="w-4 h-4 text-[#34483D]" />
-            <span>Bitácora de auditoría (audit_log • {auditLog.length})</span>
+            <span>Historial de auditoría ({auditLog.length})</span>
           </div>
-          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-            {auditLog.map((item) => (
-              <div
-                key={item.id}
-                className="p-2.5 rounded-xl bg-[#F6F5F0] text-[11px] flex items-center justify-between"
-              >
-                <div>
-                  <span className="font-bold text-[#26332D]">
-                    {item.entity_type} ({item.field_changed}):
-                  </span>{" "}
-                  <span className="text-[#68736B]">
-                    {item.old_value ?? "null"} →{" "}
-                    <strong className="text-[#23845B]">{item.new_value}</strong>
+          {auditLog.length === 0 ? (
+            <p className="text-xs text-[#68736B]">
+              Aún no se han registrado cambios auditables en tu cuenta.
+            </p>
+          ) : (
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              {auditLog.map((item) => (
+                <div
+                  key={item.id}
+                  className="p-2.5 rounded-xl bg-[#F6F5F0] text-[11px] flex items-center justify-between"
+                >
+                  <div>
+                    <span className="font-bold text-[#26332D]">
+                      {item.entity_type} ({item.field_changed}):
+                    </span>{" "}
+                    <span className="text-[#68736B]">
+                      {item.old_value ?? "vacío"} →{" "}
+                      <strong className="text-[#23845B]">
+                        {item.new_value}
+                      </strong>
+                    </span>
+                  </div>
+                  <span className="text-[#68736B] tabular-nums">
+                    {formatDateDDMMYYYY(item.changed_at)}
                   </span>
                 </div>
-                <span className="text-[#68736B] tabular-nums">
-                  {formatDateDDMMYYYY(item.changed_at)}
-                </span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
-  // === P30: Centro de Avisos (Hoy no leídas con punto verde vs Esta semana leídas) ===
+  // === Centro de Avisos ===
   if (activeScreen === "P30") {
     const unreadNotifs = notifications.filter((n) => !n.read_at);
     const readNotifs = notifications.filter((n) => Boolean(n.read_at));
@@ -945,7 +1025,7 @@ export function ManagementScreens() {
             </button>
             <div>
               <span className="text-[11px] font-semibold uppercase tracking-wider text-[#68736B]">
-                Alertas proactivas • P30
+                Alertas proactivas
               </span>
               <h1 className="text-xl font-bold text-[#26332D]">
                 Centro de avisos
@@ -964,14 +1044,14 @@ export function ManagementScreens() {
           )}
         </div>
 
-        {/* Sección Hoy (No leídas con punto verde #23845B) */}
+        {/* Sección Hoy (No leídas) */}
         <div className="space-y-2.5">
           <h2 className="text-xs font-bold uppercase tracking-wider text-[#26332D]">
-            Hoy • Nuevos avisos ({unreadNotifs.length})
+            Nuevos avisos ({unreadNotifs.length})
           </h2>
           {unreadNotifs.length === 0 ? (
             <div className="p-4 rounded-2xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs text-[#68736B]">
-              No tienes avisos pendientes de leer hoy.
+              No tienes avisos pendientes de leer.
             </div>
           ) : (
             unreadNotifs.map((n) => (
@@ -990,7 +1070,7 @@ export function ManagementScreens() {
                     </h3>
                   </div>
                   <span className="text-[10px] text-[#68736B] shrink-0">
-                    Hoy 08:05
+                    {formatDateDDMMYYYY(n.scheduled_for)}
                   </span>
                 </div>
 
@@ -1038,69 +1118,75 @@ export function ManagementScreens() {
           )}
         </div>
 
-        {/* Sección Esta semana (Leídas) */}
-        <div className="space-y-2.5 pt-2">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-[#68736B]">
-            Esta semana • Leídos ({readNotifs.length})
-          </h2>
-          {readNotifs.map((n) => (
-            <div
-              key={n.id}
-              onClick={() => {
-                if (n.related_transaction_id) {
-                  setSelectedTransactionId(n.related_transaction_id);
-                  setActiveScreen("P14");
-                } else {
-                  setActiveScreen("P20");
-                }
-              }}
-              className="bg-[#FFFFFF]/80 rounded-2xl p-3.5 border border-[#E4E6DE] space-y-1 cursor-pointer"
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold text-[#26332D]">{n.title}</h3>
-                <span className="text-[10px] text-[#68736B]">Leído</span>
+        {/* Sección Leídas */}
+        {readNotifs.length > 0 && (
+          <div className="space-y-2.5 pt-2">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[#68736B]">
+              Avisos anteriores ({readNotifs.length})
+            </h2>
+            {readNotifs.map((n) => (
+              <div
+                key={n.id}
+                onClick={() => {
+                  if (n.related_transaction_id) {
+                    setSelectedTransactionId(n.related_transaction_id);
+                    setActiveScreen("P14");
+                  } else {
+                    setActiveScreen("P20");
+                  }
+                }}
+                className="bg-[#FFFFFF]/80 rounded-2xl p-3.5 border border-[#E4E6DE] space-y-1 cursor-pointer"
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-[#26332D]">{n.title}</h3>
+                  <span className="text-[10px] text-[#68736B]">Leído</span>
+                </div>
+                <p className="text-xs text-[#68736B] leading-relaxed">
+                  {n.body}
+                </p>
               </div>
-              <p className="text-xs text-[#68736B] leading-relaxed">{n.body}</p>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
 
-  // === P28: Menú Más (Hub de Gestión, Sincronización Supabase y Estados Especiales) ===
+  // === Menú Más (Hub de Gestión, Manual, Tutorial, Tema y Sincronización) ===
   return (
     <div className="flex-1 flex flex-col p-4 space-y-4">
       <div>
         <span className="text-[11px] font-semibold uppercase tracking-wider text-[#68736B]">
-          Administración y cuenta • P28
+          Administración y cuenta
         </span>
         <h1 className="text-xl font-bold text-[#26332D]">Más opciones</h1>
       </div>
 
-      {/* Tarjeta de Perfil y Estado de Supabase */}
+      {/* Tarjeta de Perfil y Estado de Nube */}
       <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-[#34483D] text-white font-bold text-base flex items-center justify-center">
-              {user.name.slice(0, 1).toUpperCase()}
+              {(user.name || "U").slice(0, 1).toUpperCase()}
             </div>
             <div>
               <div className="text-sm font-bold text-[#26332D]">
-                {user.name}
+                {user.name || "Mi cuenta"}
               </div>
-              <div className="text-xs text-[#68736B]">{user.email}</div>
+              <div className="text-xs text-[#68736B]">
+                {user.email || "Espacio personal"}
+              </div>
             </div>
           </div>
           <span className="px-2.5 py-1 rounded-full bg-[#EDF7F2] text-[#23845B] text-[11px] font-semibold">
-            Cuenta principal
+            Cuenta activa
           </span>
         </div>
 
         <div className="pt-3 border-t border-[#E4E6DE] flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-xs text-[#68736B]">
             <Database className="w-4 h-4 text-[#23845B]" />
-            <span>Supabase: beqpktixfijdzjdtrxsz</span>
+            <span>Respaldo seguro en la nube</span>
           </div>
           <button
             type="button"
@@ -1108,7 +1194,7 @@ export function ManagementScreens() {
             disabled={isSyncing}
             className="px-3 py-1.5 rounded-xl bg-[#23845B] text-white text-xs font-semibold cursor-pointer"
           >
-            {isSyncing ? "Sincronizando..." : "Sincronizar nube"}
+            {isSyncing ? "Sincronizando..." : "Sincronizar"}
           </button>
         </div>
 
@@ -1130,7 +1216,7 @@ export function ManagementScreens() {
             <Repeat className="w-5 h-5 text-[#34483D]" />
             <div className="text-left">
               <div className="text-sm font-bold text-[#26332D]">
-                Reglas recurrentes (P22–P24)
+                Reglas recurrentes
               </div>
               <div className="text-xs text-[#68736B]">
                 Ingresos y gastos fijos periódicos ({recurrenceRules.length})
@@ -1149,7 +1235,7 @@ export function ManagementScreens() {
             <Tag className="w-5 h-5 text-[#34483D]" />
             <div className="text-left">
               <div className="text-sm font-bold text-[#26332D]">
-                Categorías y prioridades (P25–P27)
+                Categorías y prioridades
               </div>
               <div className="text-xs text-[#68736B]">
                 Esencial, Importante y Flexible ({categories.length})
@@ -1168,7 +1254,7 @@ export function ManagementScreens() {
             <Bell className="w-5 h-5 text-[#34483D]" />
             <div className="text-left">
               <div className="text-sm font-bold text-[#26332D]">
-                Centro de avisos (P30)
+                Centro de avisos
               </div>
               <div className="text-xs text-[#68736B]">
                 Vencimientos, ingresos atrasados y alertas de presupuesto
@@ -1187,10 +1273,10 @@ export function ManagementScreens() {
             <Settings className="w-5 h-5 text-[#34483D]" />
             <div className="text-left">
               <div className="text-sm font-bold text-[#26332D]">
-                Configuración y Corte de Saldo (P29)
+                Configuración y Corte de Saldo
               </div>
               <div className="text-xs text-[#68736B]">
-                Saldo inicial ({formatMXN(account.opening_balance)}) y bitácora audit_log
+                Saldo inicial ({formatMXN(account.opening_balance)}) e historial
               </div>
             </div>
           </div>
@@ -1198,54 +1284,80 @@ export function ManagementScreens() {
         </button>
       </div>
 
-      {/* Estados Especiales del PRD (P31, P32, P33) */}
-      <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-2.5">
-        <div className="text-xs font-bold uppercase tracking-wider text-[#68736B]">
-          Estados especiales del sistema (P31–P33)
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => setActiveScreen("P31")}
-            className="p-2.5 rounded-xl bg-[#F6F5F0] hover:bg-[#E8DCCB]/50 border border-[#E4E6DE] text-left cursor-pointer"
-          >
-            <Calendar className="w-4 h-4 text-[#34483D] mb-1" />
-            <div className="text-xs font-bold text-[#26332D]">P31 Vacío</div>
-            <div className="text-[10px] text-[#68736B]">Sin registros</div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveScreen("P32")}
-            className="p-2.5 rounded-xl bg-[#FEF6E7] hover:bg-[#F5DFA8]/50 border border-[#F5DFA8] text-left cursor-pointer"
-          >
-            <HelpCircle className="w-4 h-4 text-[#D99A32] mb-1" />
-            <div className="text-xs font-bold text-[#9A6712]">
-              P32 Incompleta
+      {/* Centro de Ayuda, Tutorial y Apariencia */}
+      <div className="bg-[#FFFFFF] rounded-2xl border border-[#E4E6DE] divide-y divide-[#E4E6DE]">
+        <button
+          type="button"
+          onClick={() => setActiveScreen("MANUAL")}
+          className="w-full p-4 flex items-center justify-between hover:bg-[#F6F5F0] transition cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <BookOpen className="w-5 h-5 text-[#34483D]" />
+            <div className="text-left">
+              <div className="text-sm font-bold text-[#26332D]">
+                Manual completo de la aplicación
+              </div>
+              <div className="text-xs text-[#68736B]">
+                Guía detallada de cada sección, fórmulas y preguntas frecuentes
+              </div>
             </div>
-            <div className="text-[10px] text-[#9A6712]">Montos por definir</div>
-          </button>
+          </div>
+          <ChevronRight className="w-4 h-4 text-[#68736B]" />
+        </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveScreen("P33")}
-            className="p-2.5 rounded-xl bg-[#FDF2F2] hover:bg-[#F5CACA]/50 border border-[#F5CACA] text-left cursor-pointer"
-          >
-            <WifiOff className="w-4 h-4 text-[#C94C4C] mb-1" />
-            <div className="text-xs font-bold text-[#C94C4C]">P33 Offline</div>
-            <div className="text-[10px] text-[#C94C4C]">Modo en caché</div>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setIsTutorialOpen(true)}
+          className="w-full p-4 flex items-center justify-between hover:bg-[#F6F5F0] transition cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <Sparkles className="w-5 h-5 text-[#23845B]" />
+            <div className="text-left">
+              <div className="text-sm font-bold text-[#26332D]">
+                Tutorial interactivo para nuevos usuarios
+              </div>
+              <div className="text-xs text-[#68736B]">
+                Recorrido paso a paso por las funciones principales
+              </div>
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-[#68736B]" />
+        </button>
+
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="w-full p-4 flex items-center justify-between hover:bg-[#F6F5F0] transition cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            {theme === "dark" ? (
+              <Sun className="w-5 h-5 text-[#D99A32]" />
+            ) : (
+              <Moon className="w-5 h-5 text-[#34483D]" />
+            )}
+            <div className="text-left">
+              <div className="text-sm font-bold text-[#26332D]">
+                Apariencia: {theme === "dark" ? "Modo Oscuro activo" : "Modo Claro activo"}
+              </div>
+              <div className="text-xs text-[#68736B]">
+                Toca para cambiar a {theme === "dark" ? "Modo Claro" : "Modo Oscuro"}
+              </div>
+            </div>
+          </div>
+          <span className="px-2.5 py-1 rounded-xl bg-[#F0F1EB] text-[#26332D] text-xs font-semibold">
+            Cambiar
+          </span>
+        </button>
       </div>
 
-      {/* Acciones de sesión y restauración */}
+      {/* Acciones de sesión y asistente inicial */}
       <div className="grid grid-cols-2 gap-2.5 pt-1">
         <button
           type="button"
-          onClick={resetToSofiaMasterDataset}
+          onClick={() => setActiveScreen("P05")}
           className="py-3 px-3 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs font-semibold text-[#26332D] cursor-pointer"
         >
-          Restaurar Dataset Sofía
+          Asistente inicial
         </button>
         <button
           type="button"
@@ -1253,7 +1365,7 @@ export function ManagementScreens() {
           className="py-3 px-3 rounded-xl bg-[#FDF2F2] border border-[#F5CACA] text-xs font-semibold text-[#C94C4C] flex items-center justify-center gap-1.5 cursor-pointer"
         >
           <LogOut className="w-3.5 h-3.5" />
-          <span>Cerrar sesión (P01)</span>
+          <span>Cerrar sesión</span>
         </button>
       </div>
     </div>
