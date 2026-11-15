@@ -7,6 +7,7 @@ import {
   formatDateDDMMYYYY,
   formatMonthYearEs,
   formatMXN,
+  formatShortDateEs,
   getEffectiveAmount,
   getEffectiveDate,
   isExpenseOverdue,
@@ -18,6 +19,7 @@ import {
   PriorityGeometryIcon,
   StatusBadge,
 } from "@/components/ui/PriorityBadge";
+import { CurrencyInput } from "@/components/ui/CurrencyInput";
 import type { PriorityLevel, TransactionStatus } from "@/lib/finance/types";
 import {
   Search,
@@ -29,6 +31,7 @@ import {
   CalendarClock,
   ShieldCheck,
   Wallet,
+  Plus,
 } from "lucide-react";
 
 export function HistoryAndBudgetScreens() {
@@ -50,8 +53,8 @@ export function HistoryAndBudgetScreens() {
     nextIncomeStretch,
   } = useFinanceStore();
 
-  // Estados para P21 (Editar Presupuesto)
-  const [limitInput, setLimitInput] = useState(String(budget.total_limit));
+  // Estados para Editar Presupuesto
+  const [limitNum, setLimitNum] = useState(budget.total_limit);
   const [thresholdInput, setThresholdInput] = useState(
     budget.alert_threshold_percent
   );
@@ -59,9 +62,8 @@ export function HistoryAndBudgetScreens() {
     budget.min_cushion_percent
   );
 
-  // === P18 (Movimientos) y P19 (Bottom Sheet de Filtros Combinables) ===
+  // === Movimientos y Bottom Sheet de Filtros Combinables ===
   if (activeScreen === "P18" || activeScreen === "P19") {
-    // Filtrar movimientos del mes actual o general según búsqueda
     const monthTxs = transactions.filter((tx) =>
       getEffectiveDate(tx).startsWith(currentYearMonth)
     );
@@ -153,7 +155,7 @@ export function HistoryAndBudgetScreens() {
                   searchQuery: e.target.value,
                 }))
               }
-              placeholder="Buscar por concepto o nota (ej. CFE, Renta, Gasolina)..."
+              placeholder="Buscar por concepto o nota (ej. Luz, Renta, Supermercado)..."
               className="w-full pl-10 pr-9 py-2.5 rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-xs text-[#26332D] focus:outline-none focus:border-[#34483D]"
             />
             {filters.searchQuery && (
@@ -209,20 +211,45 @@ export function HistoryAndBudgetScreens() {
         {/* Lista agrupada por fecha */}
         <div className="space-y-4 flex-1">
           {Object.keys(groupedByDate).length === 0 ? (
-            <div className="bg-[#FFFFFF] rounded-2xl p-8 border border-[#E4E6DE] text-center space-y-2">
+            <div className="bg-[#FFFFFF] rounded-2xl p-8 border border-[#E4E6DE] text-center space-y-2.5">
               <div className="text-sm font-bold text-[#26332D]">
-                No se encontraron movimientos con estos filtros
+                {monthTxs.length === 0
+                  ? "Aún no tienes movimientos en este mes"
+                  : "No se encontraron movimientos con estos filtros"}
               </div>
               <p className="text-xs text-[#68736B]">
-                Prueba limpiando los filtros activos o cambiando tu búsqueda.
+                {monthTxs.length === 0
+                  ? "Registra tus ingresos y gastos del mes para llevar un control completo de tu historial."
+                  : "Prueba limpiando los filtros activos o cambiando tu búsqueda."}
               </p>
-              <button
-                type="button"
-                onClick={resetFilters}
-                className="mt-2 px-4 py-2 rounded-xl bg-[#34483D] text-white text-xs font-semibold cursor-pointer"
-              >
-                Restablecer filtros
-              </button>
+              {monthTxs.length === 0 ? (
+                <div className="flex items-center justify-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveScreen("P12")}
+                    className="px-4 py-2 rounded-xl bg-[#34483D] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Nuevo gasto</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveScreen("P13")}
+                    className="px-4 py-2 rounded-xl bg-[#23845B] text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Nuevo ingreso</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="mt-2 px-4 py-2 rounded-xl bg-[#34483D] text-white text-xs font-semibold cursor-pointer"
+                >
+                  Restablecer filtros
+                </button>
+              )}
             </div>
           ) : (
             Object.entries(groupedByDate).map(([dateKey, dayTxs]) => (
@@ -320,7 +347,7 @@ export function HistoryAndBudgetScreens() {
           )}
         </div>
 
-        {/* P19: Bottom Sheet de Filtros Combinables */}
+        {/* Bottom Sheet de Filtros Combinables */}
         {activeScreen === "P19" && (
           <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center">
             <div className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl p-5 border-t border-[#E4E6DE] shadow-2xl max-h-[85vh] flex flex-col">
@@ -329,7 +356,7 @@ export function HistoryAndBudgetScreens() {
               <div className="flex items-center justify-between pb-3 border-b border-[#E4E6DE]">
                 <div>
                   <span className="text-[11px] font-bold uppercase tracking-wider text-[#34483D]">
-                    P19 • Filtros combinables
+                    Filtros combinables
                   </span>
                   <h3 className="text-lg font-bold text-[#26332D]">
                     Filtrar movimientos
@@ -498,10 +525,10 @@ export function HistoryAndBudgetScreens() {
     );
   }
 
-  // === P20 (Presupuesto Mensual) y P21 (Editar Presupuesto Mensual) ===
+  // === Presupuesto Mensual y Editar Presupuesto Mensual ===
   const handleSaveBudget = (e: React.FormEvent) => {
     e.preventDefault();
-    const newTotal = Number(limitInput) || 20000;
+    const newTotal = limitNum > 0 ? limitNum : 0;
     updateBudget({
       total_limit: newTotal,
       alert_threshold_percent: thresholdInput,
@@ -512,6 +539,10 @@ export function HistoryAndBudgetScreens() {
     });
     setActiveScreen("P20");
   };
+
+  const nextIncomeDateLabel = nextIncomeStretch.nextIncomeTransaction
+    ? formatShortDateEs(nextIncomeStretch.nextIncomeTransaction.expected_date)
+    : "fin de mes";
 
   return (
     <div className="flex-1 flex flex-col p-4 space-y-4">
@@ -527,7 +558,7 @@ export function HistoryAndBudgetScreens() {
         <button
           type="button"
           onClick={() => {
-            setLimitInput(String(budget.total_limit));
+            setLimitNum(budget.total_limit);
             setThresholdInput(budget.alert_threshold_percent);
             setCushionPercentInput(budget.min_cushion_percent);
             setActiveScreen("P21");
@@ -539,7 +570,7 @@ export function HistoryAndBudgetScreens() {
         </button>
       </div>
 
-      {/* Tarjeta Principal con Anillo Dona 63% y Barra Segmentada */}
+      {/* Tarjeta Principal con Anillo Dona y Barra Segmentada */}
       <div className="bg-[#FFFFFF] rounded-2xl p-5 border border-[#E4E6DE] shadow-xs space-y-4">
         <div className="flex items-center gap-5">
           {/* Anillo SVG Dona */}
@@ -553,7 +584,7 @@ export function HistoryAndBudgetScreens() {
                 stroke="#F0F1EB"
                 strokeWidth="12"
               />
-              {/* Comprometido total (Pagado + Pendiente = 63%) */}
+              {/* Comprometido total (Pagado + Pendiente) */}
               <circle
                 cx="50"
                 cy="50"
@@ -566,7 +597,7 @@ export function HistoryAndBudgetScreens() {
                 } 251.3`}
                 strokeLinecap="round"
               />
-              {/* Pagado (46.6%) */}
+              {/* Pagado */}
               <circle
                 cx="50"
                 cy="50"
@@ -661,7 +692,7 @@ export function HistoryAndBudgetScreens() {
         </div>
       </div>
 
-      {/* Tarjeta Comparativa: Cuenta vs. Presupuesto (PRD 6.3 / P20) */}
+      {/* Tarjeta Comparativa: Cuenta vs. Presupuesto */}
       <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-3">
         <div className="flex items-center gap-2 text-xs font-bold text-[#26332D]">
           <Wallet className="w-4 h-4 text-[#34483D]" />
@@ -676,7 +707,7 @@ export function HistoryAndBudgetScreens() {
               {formatMXN(monthProjection.projectedClosingBalance)}
             </span>
             <span className="text-[11px] text-[#68736B]">
-              Dinero real al 30 Nov
+              Saldo estimado al cierre del mes
             </span>
           </div>
           <div className="p-3 rounded-xl bg-[#F6F5F0]">
@@ -687,13 +718,13 @@ export function HistoryAndBudgetScreens() {
               {formatMXN(budgetSummary.availableBudget)}
             </span>
             <span className="text-[11px] text-[#68736B]">
-              Restante de tu techo de $20k
+              Restante de tu techo mensual
             </span>
           </div>
         </div>
       </div>
 
-      {/* Tarjeta "Hasta tu próximo ingreso" + Punto más bajo del mes (PRD 8.3: $3,200.50 el 28/11/2026) */}
+      {/* Tarjeta "Hasta tu próximo ingreso" + Punto más bajo del mes */}
       <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs font-bold text-[#26332D]">
@@ -702,14 +733,14 @@ export function HistoryAndBudgetScreens() {
           </div>
           {nextIncomeStretch.daysUntilNextIncome !== null && (
             <span className="px-2.5 py-0.5 rounded-full bg-[#E8DCCB] text-[#26332D] text-[11px] font-bold">
-              Faltan {nextIncomeStretch.daysUntilNextIncome} días (30 Nov)
+              Faltan {nextIncomeStretch.daysUntilNextIncome} días ({nextIncomeDateLabel})
             </span>
           )}
         </div>
 
         <div className="grid grid-cols-2 gap-3 text-xs">
           <div className="p-3 rounded-xl bg-[#F6F5F0]">
-            <div className="text-[#68736B]">Pagos antes del 30 Nov</div>
+            <div className="text-[#68736B]">Pagos antes de {nextIncomeDateLabel}</div>
             <div className="text-sm font-bold tabular-nums text-[#C94C4C] mt-0.5">
               -{formatMXN(nextIncomeStretch.pendingExpensesBeforeNextIncome)}
             </div>
@@ -724,7 +755,7 @@ export function HistoryAndBudgetScreens() {
               {formatMXN(nextIncomeStretch.balanceJustBeforeNextIncome)}
             </div>
             <div className="text-[11px] text-[#23845B] mt-0.5">
-              Cubre todos tus pagos previos
+              Liquidez disponible en el tramo
             </div>
           </div>
         </div>
@@ -743,7 +774,7 @@ export function HistoryAndBudgetScreens() {
               <span className="text-[11px] text-[#68736B]">
                 Ocurre el{" "}
                 {formatDateDDMMYYYY(nextIncomeStretch.lowestPointOfMonth.date)}{" "}
-                • Supera tu colchón mínimo de{" "}
+                • Colchón mínimo configurado:{" "}
                 {formatMXN(monthProjection.minCushionAmount)}
               </span>
             </div>
@@ -752,7 +783,7 @@ export function HistoryAndBudgetScreens() {
         </div>
       </div>
 
-      {/* Desglose por Prioridad (Esencial $9,249 / Importante $2,000 / Flexible $1,351) */}
+      {/* Desglose por Prioridad */}
       <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-3">
         <h2 className="text-xs font-bold uppercase tracking-wider text-[#68736B]">
           Desglose de gastos por prioridad
@@ -782,7 +813,7 @@ export function HistoryAndBudgetScreens() {
         </div>
       </div>
 
-      {/* P21: Bottom Sheet Editar Presupuesto Mensual */}
+      {/* Bottom Sheet Editar Presupuesto Mensual */}
       {activeScreen === "P21" && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] flex items-end justify-center">
           <div className="w-full max-w-[430px] bg-[#FFFFFF] rounded-t-3xl p-5 border-t border-[#E4E6DE] shadow-2xl">
@@ -791,7 +822,7 @@ export function HistoryAndBudgetScreens() {
             <div className="flex items-center justify-between pb-3 border-b border-[#E4E6DE]">
               <div>
                 <span className="text-[11px] font-bold uppercase tracking-wider text-[#34483D]">
-                  P21 • Configuración de techo
+                  Configuración de techo mensual
                 </span>
                 <h3 className="text-lg font-bold text-[#26332D]">
                   Editar presupuesto mensual
@@ -811,19 +842,12 @@ export function HistoryAndBudgetScreens() {
                 <label className="block text-xs font-semibold text-[#68736B] mb-1.5">
                   Límite total del mes (MXN)
                 </label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-lg font-bold text-[#68736B]">
-                    $
-                  </span>
-                  <input
-                    type="number"
-                    step="100"
-                    required
-                    value={limitInput}
-                    onChange={(e) => setLimitInput(e.target.value)}
-                    className="w-full pl-9 pr-4 py-3 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-2xl font-bold tabular-nums text-[#26332D]"
-                  />
-                </div>
+                <CurrencyInput
+                  value={limitNum}
+                  onChange={(_, num) => setLimitNum(num)}
+                  placeholder="Ej. 20,000.00"
+                  required
+                />
               </div>
 
               <div>
@@ -853,9 +877,7 @@ export function HistoryAndBudgetScreens() {
                   </span>
                   <span className="font-bold text-[#23845B] tabular-nums">
                     {cushionPercentInput}% (
-                    {formatMXN(
-                      (Number(limitInput) || 0) * (cushionPercentInput / 100)
-                    )}
+                    {formatMXN(limitNum * (cushionPercentInput / 100))}
                     )
                   </span>
                 </div>
@@ -877,9 +899,7 @@ export function HistoryAndBudgetScreens() {
                   Nuevo disponible con gasto actual ({formatMXN(budgetSummary.committedExpense)}):
                 </span>
                 <strong className="tabular-nums text-[#23845B]">
-                  {formatMXN(
-                    (Number(limitInput) || 0) - budgetSummary.committedExpense
-                  )}
+                  {formatMXN(limitNum - budgetSummary.committedExpense)}
                 </strong>
               </div>
 
