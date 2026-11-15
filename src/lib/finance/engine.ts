@@ -2,9 +2,13 @@ import type {
   Account,
   Budget,
   BudgetSummary,
+  CustomScheduleDayItem,
   DailyProjectionPoint,
+  FinancialInsightTip,
+  FinancialProjectionExplanation,
   MonthProjectionSummary,
   NextIncomeStretch,
+  ParsedRecurrenceSchedule,
   PriorityLevel,
   RecurrenceEditScope,
   RecurrenceRule,
@@ -896,3 +900,740 @@ export function applyRecurrenceEditScope(params: {
     rules: updatedRules,
   };
 }
+
+const WEEKDAY_NAMES_ES = [
+  "Domingo",
+  "Lunes",
+  "Martes",
+  "Miércoles",
+  "Jueves",
+  "Viernes",
+  "Sábado",
+];
+
+/**
+ * Serializa días personalizados, montos alternados (ej. catorcena grande y pequeña)
+ * y ajuste de fin de semana dentro del campo `semimonthly_days` compatible con Supabase.
+ */
+export function serializeRecurrenceSchedule(params: {
+  items?: CustomScheduleDayItem[];
+  alternateAmount?: number | null;
+  weekendShift?: "none" | "friday";
+}): string | null {
+  const parts: string[] = [];
+
+  if (
+    params.alternateAmount !== undefined &&
+    params.alternateAmount !== null &&
+    params.alternateAmount > 0
+  ) {
+    parts.push(`alt:${roundCurrency(params.alternateAmount)}`);
+  }
+
+  if (params.items && params.items.length > 0) {
+    const dayTokens = params.items.map((item) => {
+      const dayKey = item.day === "last" ? "last" : String(item.day);
+      if (
+        item.amount !== undefined &&
+        item.amount !== null &&
+        item.amount > 0
+      ) {
+        return `${dayKey}:${roundCurrency(item.amount)}`;
+      }
+      return dayKey;
+    });
+    parts.push(dayTokens.join(","));
+  }
+
+  let base = parts.join("|");
+  if (params.weekendShift === "friday") {
+    base = base ? `${base};weekend=friday` : "weekend=friday";
+  }
+
+  return base || null;
+}
+
+/**
+ * Parsea la configuración avanzada de una regla recurrente (`semimonthly_days`, `day_of_month`, `frequency`).
+ */
+export function parseRecurrenceSchedule(
+  rule: Pick<
+    RecurrenceRule,
+    | "frequency"
+    | "day_of_month"
+    | "semimonthly_days"
+    | "day_of_week"
+    | "default_amount"
+  >
+): ParsedRecurrenceSchedule {
+  let weekendShift: "none" | "friday" = "none";
+  let alternateAmount: number | null = null;
+  const items: CustomScheduleDayItem[] = [];
+
+  const raw = (rule.semimonthly_days || "").trim();
+  if (raw) {
+    const [mainPart, ...flagParts] = raw.split(";");
+    for (const flag of flagParts) {
+      if (flag.trim() === "weekend=friday") {
+        weekendShift = "friday";
+      }
+    }
+
+    if (mainPart.trim() === "weekend=friday") {
+      weekendShift = "friday";
+    } else if (mainPart.trim()) {
+      const sections = mainPart.split("|");
+      for (const sec of sections) {
+        const trimmed = sec.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith("alt:")) {
+          const val = Number(trimmed.slice(4));
+          if (!Number.isNaN(val) && val > 0) {
+            alternateAmount = roundCurrency(val);
+          }
+          continue;
+        }
+        const tokens = trimmed.split(",");
+        for (const tok of tokens) {
+          const clean = tok.trim();
+          if (!clean) continue;
+          const [dayStr, amtStr] = clean.split(":");
+          const dayKey =
+            dayStr === "last"
+              ? "last"
+              : Math.min(31, Math.max(1, Number(dayStr) || 1));
+          const parsedAmt =
+            amtStr !== undefined && amtStr !== "" ? Number(amtStr) : null;
+          items.push({
+            day: dayKey,
+            amount:
+              parsedAmt !== null && !Number.isNaN(parsedAmt) && parsedAmt > 0
+                ? roundCurrency(parsedAmt)
+                : null,
+          });
+        }
+      }
+    }
+  }
+
+  if (rule.frequency === "weekly") {
+    return {
+      mode: "weekly",
+      items,
+      alternateAmount,
+      weekendShift,
+    };
+  }
+
+  if (rule.frequency === "biweekly") {
+    return {
+      mode: "biweekly",
+      items,
+      alternateAmount,
+      weekendShift,
+    };
+  }
+
+  if (rule.frequency === "semimonthly") {
+    const effectiveItems =
+      items.length > 0 ? items : [{ day: 15 as const }, { day: "last" as const }];
+    return {
+      mode: effectiveItems.length > 2 ? "multi_day" : "semimonthly",
+      items: effectiveItems,
+      alternateAmount,
+      weekendShift,
+    };
+  }
+
+  if (items.length > 1) {
+    return {
+      mode: "multi_day",
+      items,
+      alternateAmount,
+      weekendShift,
+    };
+  }
+
+  const singleDay: CustomScheduleDayItem =
+    items[0] || { day: rule.day_of_month || 1, amount: null };
+
+  return {
+    mode: "single_day",
+    items: [singleDay],
+    alternateAmount,
+    weekendShift,
+  };
+}
+
+export function adjustDateForWeekend(
+  dateStr: string,
+  weekendShift: "none" | "friday"
+): string {
+  if (weekendShift !== "friday") return dateStr.slice(0, 10);
+  const [y, m, d] = dateStr.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return dateStr.slice(0, 10);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const dow = dt.getUTCDay();
+  if (dow === 6 && d > 1) {
+    // Sábado -> Viernes anterior
+    return `${y}-${String(m).padStart(2, "0")}-${String(d - 1).padStart(2, "0")}`;
+  }
+  if (dow === 0 && d > 2) {
+    // Domingo -> Viernes anterior
+    return `${y}-${String(m).padStart(2, "0")}-${String(d - 2).padStart(2, "0")}`;
+  }
+  return dateStr.slice(0, 10);
+}
+
+/**
+ * Genera una descripción clara en español del esquema de cobro/pago de una regla recurrente.
+ */
+export function describeRecurrenceRuleSchedule(rule: RecurrenceRule): string {
+  const parsed = parseRecurrenceSchedule(rule);
+  const weekendNote =
+    parsed.weekendShift === "friday" ? " • Fin de semana → Viernes" : "";
+
+  if (rule.frequency === "biweekly") {
+    if (parsed.alternateAmount && parsed.alternateAmount > 0) {
+      return `Catorcenal (cada 14 días) • Alterna ${formatMXN(
+        rule.default_amount,
+        { showPrefix: false }
+      )} y ${formatMXN(parsed.alternateAmount, {
+        showPrefix: false,
+      })}${weekendNote}`;
+    }
+    return `Catorcenal (cada 14 días desde ${formatShortDateEs(
+      rule.start_date
+    )})${weekendNote}`;
+  }
+
+  if (rule.frequency === "weekly") {
+    const dow =
+      rule.day_of_week !== null && rule.day_of_week !== undefined
+        ? rule.day_of_week
+        : new Date(`${rule.start_date.slice(0, 10)}T00:00:00Z`).getUTCDay();
+    const dayName = WEEKDAY_NAMES_ES[dow] || "Viernes";
+    if (parsed.alternateAmount && parsed.alternateAmount > 0) {
+      return `Semanal (cada ${dayName}) • Alterna ${formatMXN(
+        rule.default_amount,
+        { showPrefix: false }
+      )} y ${formatMXN(parsed.alternateAmount, { showPrefix: false })}`;
+    }
+    return `Semanal (cada ${dayName})`;
+  }
+
+  if (parsed.mode === "semimonthly" || parsed.mode === "multi_day") {
+    const dayLabels = parsed.items.map((it) =>
+      it.day === "last" ? "fin de mes" : `día ${it.day}`
+    );
+    const hasCustomAmounts = parsed.items.some(
+      (it) =>
+        it.amount !== null &&
+        it.amount !== undefined &&
+        it.amount > 0 &&
+        it.amount !== rule.default_amount
+    );
+    const prefix =
+      parsed.items.length === 2 ? "Quincenal" : `Calendario (${parsed.items.length} fechas/mes)`;
+    if (hasCustomAmounts) {
+      const amountPairs = parsed.items
+        .map((it) => {
+          const dLabel = it.day === "last" ? "fin" : `${it.day}`;
+          const amt = it.amount ?? rule.default_amount ?? 0;
+          return `día ${dLabel}: ${formatMXN(amt, { showPrefix: false })}`;
+        })
+        .join(" / ");
+      return `${prefix} (${amountPairs})${weekendNote}`;
+    }
+    return `${prefix} (${dayLabels.join(", ")})${weekendNote}`;
+  }
+
+  const freqMap: Record<string, string> = {
+    monthly: "Mensual",
+    bimonthly: "Bimestral (cada 2 meses)",
+    quarterly: "Trimestral (cada 3 meses)",
+    semiannual: "Semestral (cada 6 meses)",
+    annual: "Anual",
+  };
+  const fLabel = freqMap[rule.frequency] || "Mensual";
+  const singleItem = parsed.items[0];
+  const dayText =
+    singleItem?.day === "last" || rule.day_of_month === 31
+      ? "último día del mes"
+      : `día ${singleItem?.day || rule.day_of_month || 1}`;
+  return `${fLabel} (${dayText})${weekendNote}`;
+}
+
+/**
+ * Genera todas las ocurrencias que le corresponden a una regla recurrente dentro de un mes (`YYYY-MM`),
+ * soportando catorcenas con monto alternado (ej. catorcena grande y pequeña), quincenas personalizadas,
+ * selección múltiple de días del calendario, pagos semanales y bimestrales/trimestrales/anuales.
+ */
+export function generateOccurrencesForRuleInMonth(params: {
+  rule: RecurrenceRule;
+  yearMonth: string;
+  referenceDate: string;
+}): Array<
+  Omit<
+    Transaction,
+    "id" | "workspace_id" | "account_id" | "created_at" | "updated_at"
+  >
+> {
+  const { rule, yearMonth, referenceDate } = params;
+  if (rule.status !== "active") return [];
+
+  const { startDate, endDate, year, month, daysInMonth } =
+    getMonthStartEnd(yearMonth);
+  const ruleStart = (rule.start_date || startDate).slice(0, 10);
+  if (rule.end_date && startDate > rule.end_date.slice(0, 10)) {
+    return [];
+  }
+
+  const parsed = parseRecurrenceSchedule(rule);
+  const results: Array<
+    Omit<
+      Transaction,
+      "id" | "workspace_id" | "account_id" | "created_at" | "updated_at"
+    >
+  > = [];
+
+  const buildTx = (
+    occurrenceDate: string,
+    expectedDate: string,
+    amount: number | null,
+    titleSuffix?: string
+  ): Omit<
+    Transaction,
+    "id" | "workspace_id" | "account_id" | "created_at" | "updated_at"
+  > => ({
+    type: rule.type,
+    title: titleSuffix ? `${rule.title} ${titleSuffix}` : rule.title,
+    category_id: rule.category_id,
+    priority: rule.priority,
+    status:
+      rule.type === "income"
+        ? "scheduled"
+        : expectedDate < referenceDate
+        ? "overdue"
+        : "pending",
+    amount_type: rule.amount_type,
+    estimated_amount: amount,
+    actual_amount: null,
+    expected_date: expectedDate,
+    settled_date: null,
+    settled_at: null,
+    recurrence_rule_id: rule.id,
+    occurrence_date: occurrenceDate,
+    is_exception: false,
+    notes: rule.notes,
+  });
+
+  if (rule.frequency === "biweekly" || rule.frequency === "weekly") {
+    const stepDays = rule.frequency === "biweekly" ? 14 : 7;
+    const anchorTime = new Date(`${ruleStart}T00:00:00Z`).getTime();
+    const mm = String(month).padStart(2, "0");
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dd = String(d).padStart(2, "0");
+      const dateStr = `${year}-${mm}-${dd}`;
+      if (rule.end_date && dateStr > rule.end_date.slice(0, 10)) continue;
+
+      const curTime = new Date(`${dateStr}T00:00:00Z`).getTime();
+      const diffDays = Math.round((curTime - anchorTime) / 86400000);
+
+      if (rule.frequency === "weekly" && rule.day_of_week !== null && rule.day_of_week !== undefined) {
+        const dow = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+        if (dow !== rule.day_of_week) continue;
+        const weekIndex = Math.max(0, Math.floor(diffDays / 7));
+        const hasAlt =
+          parsed.alternateAmount !== null && parsed.alternateAmount > 0;
+        const amt =
+          hasAlt && weekIndex % 2 === 1
+            ? parsed.alternateAmount
+            : rule.default_amount;
+        const expDate = adjustDateForWeekend(dateStr, parsed.weekendShift);
+        results.push(buildTx(dateStr, expDate, amt));
+      } else if (diffDays % stepDays === 0 && diffDays >= -stepDays) {
+        const cycleIdx = Math.abs(Math.round(diffDays / stepDays));
+        const hasAlt =
+          parsed.alternateAmount !== null && parsed.alternateAmount > 0;
+        const isSecond = cycleIdx % 2 === 1;
+        const amt =
+          hasAlt && isSecond ? parsed.alternateAmount : rule.default_amount;
+        const expDate = adjustDateForWeekend(dateStr, parsed.weekendShift);
+        const suffix =
+          rule.frequency === "biweekly" && hasAlt
+            ? isSecond
+              ? "(2ª catorcena)"
+              : "(1ª catorcena)"
+            : undefined;
+        results.push(buildTx(dateStr, expDate, amt, suffix));
+      }
+    }
+    return results;
+  }
+
+  // Verificar intervalo de meses para bimestral, trimestral, semestral, anual
+  const [startYear, startMonth] = ruleStart.slice(0, 7).split("-").map(Number);
+  const monthsDiff = (year - startYear) * 12 + (month - startMonth);
+  const monthStep =
+    rule.frequency === "bimonthly"
+      ? 2
+      : rule.frequency === "quarterly"
+      ? 3
+      : rule.frequency === "semiannual"
+      ? 6
+      : rule.frequency === "annual"
+      ? 12
+      : 1;
+
+  if (monthStep > 1 && (monthsDiff < 0 || monthsDiff % monthStep !== 0)) {
+    return [];
+  }
+
+  const mm = String(month).padStart(2, "0");
+  const seenDays = new Set<number>();
+
+  parsed.items.forEach((item, idx) => {
+    const rawDay =
+      item.day === "last"
+        ? daysInMonth
+        : Math.min(Math.max(1, Number(item.day) || 1), daysInMonth);
+    if (seenDays.has(rawDay)) return;
+    seenDays.add(rawDay);
+
+    const dd = String(rawDay).padStart(2, "0");
+    const occurrenceDate = `${year}-${mm}-${dd}`;
+    if (rule.end_date && occurrenceDate > rule.end_date.slice(0, 10)) return;
+
+    const expectedDate = adjustDateForWeekend(
+      occurrenceDate,
+      parsed.weekendShift
+    );
+    const amount =
+      item.amount !== undefined && item.amount !== null && item.amount > 0
+        ? item.amount
+        : rule.default_amount;
+
+    let suffix: string | undefined;
+    if (parsed.items.length === 2 && rule.frequency === "semimonthly") {
+      suffix = idx === 1 ? "(2ª quincena)" : undefined;
+    } else if (parsed.items.length > 1) {
+      suffix = `(Día ${rawDay})`;
+    }
+
+    results.push(buildTx(occurrenceDate, expectedDate, amount, suffix));
+  });
+
+  return results;
+}
+
+/**
+ * Genera el diagnóstico detallado de la proyección del mes y consejos financieros personalizados
+ * adaptados a la situación real del usuario (superávit, colchón ajustado, bache intermedio de liquidez,
+ * déficit de cierre, gastos vencidos, ingresos atrasados o proporción de gastos flexibles).
+ */
+export function explainFinancialProjection(params: {
+  monthProjection: MonthProjectionSummary;
+  budgetSummary: BudgetSummary;
+  nextIncomeStretch: NextIncomeStretch;
+  transactions: Transaction[];
+  referenceDate: string;
+}): FinancialProjectionExplanation {
+  const {
+    monthProjection,
+    budgetSummary,
+    nextIncomeStretch,
+    transactions,
+    referenceDate,
+  } = params;
+
+  const startingAmount = roundCurrency(
+    monthProjection.startingBalance ?? monthProjection.currentBalance
+  );
+  const scheduledIncomesAmount = roundCurrency(monthProjection.scheduledIncome);
+  const pendingExpensesAmount = roundCurrency(monthProjection.pendingExpense);
+  const projectedClosingAmount = roundCurrency(
+    monthProjection.projectedClosingBalance ?? startingAmount
+  );
+
+  const lowestDate = monthProjection.lowestBalancePoint?.date ?? null;
+  const lowestBalance =
+    monthProjection.lowestBalancePoint?.balance ?? startingAmount;
+  const minCushionAmount = roundCurrency(monthProjection.minCushionAmount);
+
+  const hasMidMonthDip =
+    lowestBalance < projectedClosingAmount &&
+    (lowestBalance < minCushionAmount || lowestBalance < 0);
+
+  const flexibleStats = budgetSummary.priorityBreakdown.find(
+    (p) => p.priority === "flexible"
+  );
+  const importantStats = budgetSummary.priorityBreakdown.find(
+    (p) => p.priority === "important"
+  );
+  const essentialStats = budgetSummary.priorityBreakdown.find(
+    (p) => p.priority === "essential"
+  );
+
+  const tips: FinancialInsightTip[] = [];
+
+  // 1. Diagnóstico principal según semáforo y curva de liquidez
+  let headline = "Tu proyección del mes es saludable";
+  let summaryText =
+    "Con tus ingresos y gastos programados actuales, cubres todos tus compromisos del mes y mantienes intacto tu colchón de seguridad.";
+
+  if (monthProjection.balanceTrafficLight === "red") {
+    if (projectedClosingAmount < 0) {
+      const deficit = Math.abs(projectedClosingAmount);
+      headline = `Atención: Cierre proyectado en déficit (-${formatMXN(
+        deficit
+      )})`;
+      summaryText = `Tus gastos pendientes superan tu liquidez más tus próximos ingresos por ${formatMXN(
+        deficit
+      )}. Necesitas ajustar gastos opcionales o reprogramar compromisos antes de fin de mes.`;
+    } else {
+      headline = `Riesgo de sobregiro temporal el ${
+        lowestDate ? formatShortDateEs(lowestDate) : "mes actual"
+      }`;
+      summaryText = `Aunque a fin de mes cierras en positivo (${formatMXN(
+        projectedClosingAmount
+      )}), el día ${
+        lowestDate ? formatShortDateEs(lowestDate) : ""
+      } tus pagos se acumulan antes de tu siguiente cobro y tu saldo cae a ${formatMXN(
+        lowestBalance
+      )}.`;
+    }
+  } else if (monthProjection.balanceTrafficLight === "amber") {
+    if (monthProjection.hasUnquantifiedPendingExpenses) {
+      headline = "Tu proyección está incompleta (faltan montos por definir)";
+      summaryText = `Tienes ${monthProjection.unquantifiedPendingExpensesCount} compromiso(s) sin monto estimado. Asígnales un aproximado para conocer tu cierre real.`;
+    } else {
+      headline = "Colchón de seguridad ajustado en el mes";
+      summaryText = `No caes en números rojos, pero tu punto más bajo (${formatMXN(
+        lowestBalance
+      )} el ${
+        lowestDate ? formatShortDateEs(lowestDate) : "mes"
+      }) queda por debajo de tu colchón mínimo recomendado de ${formatMXN(
+        minCushionAmount
+      )}.`;
+    }
+  }
+
+  // 2. Consejos personalizados según las condiciones detectadas
+  if (
+    monthProjection.overdueExpenseCount > 0 ||
+    monthProjection.delayedIncomeCount > 0
+  ) {
+    const firstOverdue = transactions.find((tx) =>
+      isExpenseOverdue(tx, referenceDate)
+    );
+    const firstDelayed = transactions.find((tx) =>
+      isIncomeDelayed(tx, referenceDate)
+    );
+    const targetTx = firstOverdue || firstDelayed;
+
+    tips.push({
+      id: "tip-overdue-delayed",
+      severity: "urgent",
+      title: "Actualiza tus movimientos con fecha pasada",
+      description: `Tienes ${
+        monthProjection.overdueExpenseCount > 0
+          ? `${monthProjection.overdueExpenseCount} gasto(s) vencido(s) (${formatMXN(
+              monthProjection.overdueExpenseAmount
+            )})`
+          : ""
+      }${
+        monthProjection.overdueExpenseCount > 0 &&
+        monthProjection.delayedIncomeCount > 0
+          ? " y "
+          : ""
+      }${
+        monthProjection.delayedIncomeCount > 0
+          ? `${monthProjection.delayedIncomeCount} ingreso(s) atrasado(s) (${formatMXN(
+              monthProjection.delayedIncome
+            )})`
+          : ""
+      }. Si ya los pagaste o cobraste, confírmalos; si aún no ocurren, reprográmalos a su nueva fecha para que tu proyección sea exacta.`,
+      actionLabel: targetTx ? `Revisar "${targetTx.title}"` : "Ir a Movimientos",
+      actionScreen: targetTx ? "P14" : "P18",
+      actionTransactionId: targetTx?.id,
+    });
+  }
+
+  if (lowestBalance < 0 && projectedClosingAmount >= 0 && lowestDate) {
+    tips.push({
+      id: "tip-midmonth-dip",
+      severity: "urgent",
+      title: `Evita el bache de liquidez del ${formatShortDateEs(lowestDate)}`,
+      description: `Tu dinero sí alcanza en el mes completo, pero tienes demasiados pagos concentrados antes de tu siguiente ingreso. Si difieres o reprogramas al menos ${formatMXN(
+        Math.abs(lowestBalance)
+      )} en pagos para después de tu fecha de cobro, evitarás quedarte sin liquidez a mitad de periodo.`,
+      impactText: `Meta: Mover ${formatMXN(
+        Math.abs(lowestBalance)
+      )} después de tu próximo cobro`,
+      actionLabel: "Ver mis compromisos en Movimientos",
+      actionScreen: "P18",
+    });
+  }
+
+  if (projectedClosingAmount < 0) {
+    const neededForZero = Math.abs(projectedClosingAmount);
+    const flexPending = flexibleStats?.pending ?? 0;
+    const impPending = importantStats?.pending ?? 0;
+    tips.push({
+      id: "tip-deficit-recovery",
+      severity: "urgent",
+      title: "Plan de rescate para cerrar el mes sin déficit",
+      description:
+        flexPending > 0
+          ? `Para recuperar ${formatMXN(
+              neededForZero
+            )}, empieza por tus gastos Flexibles pendientes (${formatMXN(
+              flexPending
+            )}). Pausar o reducir esos gastos opcionales e Importantes (${formatMXN(
+              impPending
+            )}) te permitirá equilibrar el mes sin tocar pagos Esenciales.`
+          : `Necesitas liberar ${formatMXN(
+              neededForZero
+            )} o generar un ingreso adicional este mes. Revisa tus gastos Importantes pendientes (${formatMXN(
+              impPending
+            )}) para ver cuáles puedes posponer al siguiente mes.`,
+      impactText: `Ajuste requerido: ${formatMXN(neededForZero)}`,
+      actionLabel: "Revisar desglose en Presupuesto",
+      actionScreen: "P20",
+    });
+  }
+
+  if (
+    lowestBalance >= 0 &&
+    minCushionAmount > 0 &&
+    lowestBalance < minCushionAmount
+  ) {
+    const gapToCushion = roundCurrency(minCushionAmount - lowestBalance);
+    tips.push({
+      id: "tip-cushion-shield",
+      severity: "warning",
+      title: "Protege tu colchón contra imprevistos",
+      description: `Te faltan ${formatMXN(
+        gapToCushion
+      )} para que ningún día del mes bajes de tu colchón de seguridad (${formatMXN(
+        minCushionAmount
+      )}). Evita compras hormiga de aquí a tu próximo cobro${
+        flexibleStats && flexibleStats.pending > 0
+          ? ` o recorta parte de tus ${formatMXN(
+              flexibleStats.pending
+            )} en gastos flexibles pendientes.`
+          : "."
+      }`,
+      impactText: `Faltan ${formatMXN(gapToCushion)} para blindar tu colchón`,
+      actionLabel: "Ajustar presupuesto",
+      actionScreen: "P20",
+    });
+  }
+
+  if (monthProjection.hasUnquantifiedPendingExpenses) {
+    const unqTx = transactions.find((tx) => isUnquantifiedExpense(tx));
+    tips.push({
+      id: "tip-unquantified",
+      severity: "warning",
+      title: "Completa los gastos con monto por definir",
+      description:
+        "Cuando un recibo (como luz o tarjeta) aún no llega, ponerle un monto estimado (~$) basado en el mes pasado evita sorpresas en tu saldo proyectado.",
+      actionLabel: unqTx ? `Estimar "${unqTx.title}"` : "Ver pendientes",
+      actionScreen: unqTx ? "P14" : "P18",
+      actionTransactionId: unqTx?.id,
+    });
+  }
+
+  if (
+    budgetSummary.totalLimit > 0 &&
+    budgetSummary.committedPercent >= budgetSummary.alertThresholdPercent
+  ) {
+    const overAmount = roundCurrency(
+      budgetSummary.committedExpense - budgetSummary.totalLimit
+    );
+    tips.push({
+      id: "tip-budget-threshold",
+      severity: budgetSummary.committedPercent > 100 ? "urgent" : "warning",
+      title:
+        budgetSummary.committedPercent > 100
+          ? `Superaste tu límite mensual por ${formatMXN(overAmount)}`
+          : `Llegaste al ${budgetSummary.committedPercent}% de tu presupuesto mensual`,
+      description: `Llevas ${formatMXN(
+        budgetSummary.committedExpense
+      )} comprometidos de tu techo de ${formatMXN(
+        budgetSummary.totalLimit
+      )}. Esenciales: ${
+        essentialStats?.percentOfBudget ?? 0
+      }% • Importantes: ${
+        importantStats?.percentOfBudget ?? 0
+      }% • Flexibles: ${flexibleStats?.percentOfBudget ?? 0}%.`,
+      actionLabel: "Ver o ajustar límite mensual",
+      actionScreen: "P21",
+    });
+  }
+
+  // Consejo positivo / hábito de ahorro o distribución inteligente de quincenas/catorcenas
+  if (projectedClosingAmount > minCushionAmount && lowestBalance >= minCushionAmount) {
+    const safeSurplus = roundCurrency(projectedClosingAmount - minCushionAmount);
+    tips.push({
+      id: "tip-surplus-saving",
+      severity: "positive",
+      title: `Tienes un excedente libre seguro de ${formatMXN(safeSurplus)}`,
+      description: `Después de cubrir todos tus gastos pendientes del mes y respetar tu colchón de seguridad (${formatMXN(
+        minCushionAmount
+      )}), te quedan ${formatMXN(
+        safeSurplus
+      )} libres. Un excelente hábito es apartar entre el 30% y 50% de ese excedente (${formatMXN(
+        roundCurrency(safeSurplus * 0.4)
+      )}) en cuanto recibas tu cobro.`,
+      impactText: `Potencial de ahorro este mes: ${formatMXN(
+        roundCurrency(safeSurplus * 0.4)
+      )}`,
+    });
+  }
+
+  // Consejo sobre balanceo de cobros (especialmente útil para catorcenas/quincenas desiguales)
+  tips.push({
+    id: "tip-income-balancing",
+    severity: "info",
+    title: "Consejo clave si recibes quincenas o catorcenas desiguales",
+    description:
+      "Si recibes un cobro fuerte (ej. catorcena grande) y otro menor (catorcena pequeña), procura asignar tus pagos pesados (renta, tarjeta o créditos) justo después del cobro grande, o reserva desde el cobro grande la diferencia para que ambas mitades del mes tengan la misma holgura.",
+    actionLabel: "Configurar reglas recurrentes",
+    actionScreen: "P22",
+  });
+
+  return {
+    statusColor: monthProjection.balanceTrafficLight,
+    headline,
+    summaryText,
+    formula: {
+      startingLabel:
+        monthProjection.periodRelationship === "future"
+          ? "Saldo inicial proyectado del mes"
+          : "Saldo líquido disponible hoy",
+      startingAmount,
+      scheduledIncomesAmount,
+      pendingExpensesAmount,
+      projectedClosingAmount,
+    },
+    liquidityRadar: {
+      lowestDate,
+      lowestBalance,
+      minCushionAmount,
+      hasMidMonthDip,
+      daysUntilNextIncome: nextIncomeStretch.daysUntilNextIncome,
+      nextIncomeTitle: nextIncomeStretch.nextIncomeTransaction?.title ?? null,
+      nextIncomeAmount: nextIncomeStretch.nextIncomeTransaction
+        ? getEffectiveAmount(nextIncomeStretch.nextIncomeTransaction)
+        : null,
+      balanceBeforeNextIncome: nextIncomeStretch.nextIncomeTransaction
+        ? nextIncomeStretch.balanceJustBeforeNextIncome
+        : null,
+    },
+    tips,
+  };
+}
+
