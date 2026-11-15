@@ -1,4 +1,4 @@
-const CACHE_NAME = "afp-pwa-cache-v1.1.2";
+const CACHE_NAME = "afp-pwa-cache-v1.1.3";
 const OFFLINE_URLS = ["/", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
