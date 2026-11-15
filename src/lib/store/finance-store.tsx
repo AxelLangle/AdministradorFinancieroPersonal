@@ -6,6 +6,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type {
@@ -292,12 +293,14 @@ interface FinanceStoreContextValue {
     actualAmount: number;
     settledDate: string;
     notes?: string;
+    skipBalanceAdjustment?: boolean;
   }) => Promise<void>;
   confirmIncomeReceipt: (params: {
     transactionId: string;
     actualAmount: number;
     settledDate: string;
     notes?: string;
+    skipBalanceAdjustment?: boolean;
   }) => Promise<void>;
   rescheduleTransaction: (
     transactionId: string,
@@ -314,7 +317,8 @@ interface FinanceStoreContextValue {
 
   // Reglas Recurrentes
   createRecurrenceRule: (
-    rule: Omit<RecurrenceRule, "id" | "workspace_id" | "account_id">
+    rule: Omit<RecurrenceRule, "id" | "workspace_id" | "account_id">,
+    openingBalanceDateOverride?: string
   ) => Promise<void>;
   updateRecurrenceRule: (
     id: string,
@@ -336,6 +340,40 @@ interface FinanceStoreContextValue {
   // Toast global
   toastMessage: string | null;
   showToast: (msg: string) => void;
+}
+
+function generateSafeUuid(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function toTransactionInsertPayload(tx: Transaction) {
+  return {
+    id: tx.id,
+    workspace_id: tx.workspace_id,
+    account_id: tx.account_id,
+    type: tx.type,
+    title: tx.title,
+    category_id: tx.category_id,
+    priority: tx.priority,
+    status: tx.status,
+    amount_type: tx.amount_type,
+    estimated_amount: tx.estimated_amount,
+    actual_amount: tx.actual_amount,
+    expected_date: tx.expected_date,
+    settled_date: tx.settled_date,
+    settled_at: tx.settled_at,
+    recurrence_rule_id: tx.recurrence_rule_id,
+    occurrence_date: tx.occurrence_date,
+    is_exception: tx.is_exception,
+    notes: tx.notes,
+  };
 }
 
 const DEFAULT_FILTERS: TransactionFilters = {
@@ -1042,6 +1080,7 @@ export function FinanceStoreProvider({
     setRecurrenceRules([]);
     setNotifications([]);
     setAuditLog([]);
+    materializedOccKeysRef.current.clear();
     setActiveScreenState("P01");
     showToast("Sesión cerrada correctamente");
   }, [showToast]);
@@ -1159,13 +1198,38 @@ export function FinanceStoreProvider({
                 .update({
                   title: tx.title,
                   estimated_amount: tx.estimated_amount,
+                  actual_amount: tx.actual_amount,
                   expected_date: tx.expected_date,
+                  settled_date: tx.settled_date,
+                  settled_at: tx.settled_at,
+                  status: tx.status,
                   priority: tx.priority,
                   category_id: tx.category_id,
                   amount_type: tx.amount_type,
+                  notes: tx.notes,
                   is_exception: tx.is_exception,
                 })
                 .eq("id", tx.id);
+            }
+          }
+
+          if (recurrenceScope !== "single") {
+            const updatedRule = result.rules.find(
+              (r) => r.id === existing.recurrence_rule_id
+            );
+            if (updatedRule) {
+              await supabase
+                .from("recurrence_rules")
+                .update({
+                  title: updatedRule.title,
+                  default_amount: updatedRule.default_amount,
+                  priority: updatedRule.priority,
+                  category_id: updatedRule.category_id,
+                  amount_type: updatedRule.amount_type,
+                  notes: updatedRule.notes,
+                  day_of_month: updatedRule.day_of_month,
+                })
+                .eq("id", updatedRule.id);
             }
           }
         }
@@ -1259,21 +1323,30 @@ export function FinanceStoreProvider({
       actualAmount,
       settledDate,
       notes,
+      skipBalanceAdjustment,
     }: {
       transactionId: string;
       actualAmount: number;
       settledDate: string;
       notes?: string;
+      skipBalanceAdjustment?: boolean;
     }) => {
       const existing = transactions.find((t) => t.id === transactionId);
       if (!existing) return;
       const nowIso = new Date().toISOString();
+      const cleanSettled = settledDate.slice(0, 10);
+      const isBeforeTodayOrCutoff =
+        cleanSettled < referenceDate.slice(0, 10) ||
+        cleanSettled < account.opening_balance_date.slice(0, 10);
+      // Pagos anteriores a "hoy" (o al corte) ya formaron parte del saldo líquido actual y no se descuentan doble.
+      const settledAtIso =
+        skipBalanceAdjustment || isBeforeTodayOrCutoff ? null : nowIso;
       const updatedTx: Transaction = {
         ...existing,
         status: "paid",
         actual_amount: actualAmount,
         settled_date: settledDate,
-        settled_at: nowIso,
+        settled_at: settledAtIso,
         notes: notes !== undefined ? notes : existing.notes,
         updated_at: nowIso,
       };
@@ -1289,15 +1362,26 @@ export function FinanceStoreProvider({
             status: "paid",
             actual_amount: actualAmount,
             settled_date: settledDate,
-            settled_at: nowIso,
+            settled_at: settledAtIso,
             notes: updatedTx.notes,
           })
           .eq("id", transactionId);
       }
 
-      showToast(`Pago de "${existing.title}" confirmado`);
+      showToast(
+        settledAtIso === null
+          ? `Pago anterior de "${existing.title}" marcado (saldo actual sin cambios)`
+          : `Pago de "${existing.title}" confirmado`
+      );
     },
-    [transactions, user.isAuthenticated, workspaceId, showToast]
+    [
+      transactions,
+      referenceDate,
+      account.opening_balance_date,
+      user.isAuthenticated,
+      workspaceId,
+      showToast,
+    ]
   );
 
   // Confirmar recepción de ingreso
@@ -1307,21 +1391,32 @@ export function FinanceStoreProvider({
       actualAmount,
       settledDate,
       notes,
+      skipBalanceAdjustment,
     }: {
       transactionId: string;
       actualAmount: number;
       settledDate: string;
       notes?: string;
+      skipBalanceAdjustment?: boolean;
     }) => {
       const existing = transactions.find((t) => t.id === transactionId);
       if (!existing) return;
       const nowIso = new Date().toISOString();
+      const cleanSettled = settledDate.slice(0, 10);
+      const isBeforeTodayOrCutoff =
+        cleanSettled < referenceDate.slice(0, 10) ||
+        cleanSettled < account.opening_balance_date.slice(0, 10);
+      const shouldExclude =
+        skipBalanceAdjustment !== undefined
+          ? skipBalanceAdjustment
+          : isBeforeTodayOrCutoff;
+      const settledAtIso = shouldExclude ? null : nowIso;
       const updatedTx: Transaction = {
         ...existing,
         status: "received",
         actual_amount: actualAmount,
         settled_date: settledDate,
-        settled_at: nowIso,
+        settled_at: settledAtIso,
         notes: notes !== undefined ? notes : existing.notes,
         updated_at: nowIso,
       };
@@ -1337,7 +1432,7 @@ export function FinanceStoreProvider({
             status: "received",
             actual_amount: actualAmount,
             settled_date: settledDate,
-            settled_at: nowIso,
+            settled_at: settledAtIso,
             notes: updatedTx.notes,
           })
           .eq("id", transactionId);
@@ -1345,7 +1440,14 @@ export function FinanceStoreProvider({
 
       showToast(`Ingreso "${existing.title}" confirmado como recibido`);
     },
-    [transactions, user.isAuthenticated, workspaceId, showToast]
+    [
+      transactions,
+      referenceDate,
+      account.opening_balance_date,
+      user.isAuthenticated,
+      workspaceId,
+      showToast,
+    ]
   );
 
   const rescheduleTransaction = useCallback(
@@ -1390,12 +1492,30 @@ export function FinanceStoreProvider({
     [transactions, referenceDate, user.isAuthenticated, workspaceId, showToast]
   );
 
+  const materializedOccKeysRef = useRef<Set<string>>(new Set());
+
   const cancelTransaction = useCallback(
     async (transactionId: string) => {
       const existing = transactions.find((t) => t.id === transactionId);
       if (!existing) return;
 
-      setTransactions((prev) => prev.filter((t) => t.id !== transactionId));
+      const isRecurringOccurrence = Boolean(
+        existing.recurrence_rule_id && existing.occurrence_date
+      );
+
+      if (isRecurringOccurrence) {
+        const nowIso = new Date().toISOString();
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.id === transactionId
+              ? { ...t, status: "cancelled", is_exception: true, updated_at: nowIso }
+              : t
+          )
+        );
+      } else {
+        setTransactions((prev) => prev.filter((t) => t.id !== transactionId));
+      }
+
       setNotifications((prev) =>
         prev.filter((n) => n.related_transaction_id !== transactionId)
       );
@@ -1404,22 +1524,34 @@ export function FinanceStoreProvider({
       );
 
       if (user.isAuthenticated && workspaceId) {
-        const { error } = await supabase
-          .from("transactions")
-          .delete()
-          .eq("id", transactionId)
-          .eq("workspace_id", workspaceId);
+        const { error } = isRecurringOccurrence
+          ? await supabase
+              .from("transactions")
+              .update({ status: "cancelled", is_exception: true })
+              .eq("id", transactionId)
+              .eq("workspace_id", workspaceId)
+          : await supabase
+              .from("transactions")
+              .delete()
+              .eq("id", transactionId)
+              .eq("workspace_id", workspaceId);
+
         if (error) {
           console.error("Error cancelando compromiso:", error);
-          setTransactions((prev) =>
-            prev.some((t) => t.id === transactionId) ? prev : [...prev, existing]
-          );
+          setTransactions((prev) => {
+            if (isRecurringOccurrence) {
+              return prev.map((t) => (t.id === transactionId ? existing : t));
+            }
+            return prev.some((t) => t.id === transactionId)
+              ? prev
+              : [...prev, existing];
+          });
           showToast("No se pudo cancelar el compromiso. Intenta de nuevo.");
           return;
         }
       }
 
-      showToast(`Compromiso "${existing.title}" cancelado y eliminado`);
+      showToast(`Compromiso "${existing.title}" cancelado`);
     },
     [transactions, user.isAuthenticated, workspaceId, showToast]
   );
@@ -1506,13 +1638,100 @@ export function FinanceStoreProvider({
   );
 
   // Reglas recurrentes
+  const buildAndPersistMissingOccurrences = useCallback(
+    async (
+      rulesToSync: RecurrenceRule[],
+      yearMonths: string[],
+      existingTxList: Transaction[],
+      cutoffDateStr: string
+    ) => {
+      if (!workspaceId || account.id === "acc-empty") return;
+      const existingOccKeys = new Set<string>();
+      existingTxList.forEach((tx) => {
+        if (tx.recurrence_rule_id && tx.occurrence_date) {
+          existingOccKeys.add(
+            `${tx.recurrence_rule_id}:${tx.occurrence_date.slice(0, 10)}`
+          );
+        }
+      });
+
+      const uniqueMonths = Array.from(new Set(yearMonths));
+      const toInsert: Transaction[] = [];
+
+      for (const r of rulesToSync) {
+        if (r.status !== "active") continue;
+        for (const ym of uniqueMonths) {
+          const generated = generateOccurrencesForRuleInMonth({
+            rule: r,
+            yearMonth: ym,
+            referenceDate,
+            openingBalanceDate: cutoffDateStr,
+          });
+          for (const occ of generated) {
+            if (!occ.occurrence_date) continue;
+            const occKey = `${r.id}:${occ.occurrence_date.slice(0, 10)}`;
+            if (
+              existingOccKeys.has(occKey) ||
+              materializedOccKeysRef.current.has(occKey)
+            ) {
+              continue;
+            }
+            materializedOccKeysRef.current.add(occKey);
+            existingOccKeys.add(occKey);
+            const nowIso = new Date().toISOString();
+            toInsert.push({
+              ...occ,
+              id: generateSafeUuid(),
+              workspace_id: workspaceId,
+              account_id: account.id,
+              created_at: nowIso,
+              updated_at: nowIso,
+            });
+          }
+        }
+      }
+
+      if (toInsert.length === 0) return;
+
+      setTransactions((prev) => {
+        const seen = new Set(
+          prev
+            .filter((t) => t.recurrence_rule_id && t.occurrence_date)
+            .map(
+              (t) => `${t.recurrence_rule_id}:${t.occurrence_date!.slice(0, 10)}`
+            )
+        );
+        const fresh = toInsert.filter(
+          (t) =>
+            t.recurrence_rule_id &&
+            t.occurrence_date &&
+            !seen.has(`${t.recurrence_rule_id}:${t.occurrence_date.slice(0, 10)}`)
+        );
+        return fresh.length > 0 ? [...fresh, ...prev] : prev;
+      });
+
+      if (user.isAuthenticated) {
+        for (const tx of toInsert) {
+          const { error } = await supabase
+            .from("transactions")
+            .insert(toTransactionInsertPayload(tx));
+          if (error && error.code !== "23505") {
+            materializedOccKeysRef.current.delete(
+              `${tx.recurrence_rule_id}:${tx.occurrence_date?.slice(0, 10)}`
+            );
+          }
+        }
+      }
+    },
+    [workspaceId, account.id, referenceDate, user.isAuthenticated]
+  );
+
   const createRecurrenceRule = useCallback(
     async (
-      ruleData: Omit<RecurrenceRule, "id" | "workspace_id" | "account_id">
+      ruleData: Omit<RecurrenceRule, "id" | "workspace_id" | "account_id">,
+      openingBalanceDateOverride?: string
     ) => {
-      const tempRuleId = crypto.randomUUID
-        ? crypto.randomUUID()
-        : `rule-${Date.now()}`;
+      const tempRuleId = generateSafeUuid();
       let finalRuleId = tempRuleId;
 
       const newRule: RecurrenceRule = {
@@ -1557,21 +1776,25 @@ export function FinanceStoreProvider({
         }
       }
 
-      // Generar todas las ocurrencias correspondientes en el mes actual si está activa
+      // Generar todas las ocurrencias correspondientes si está activa (en el mes actual y mes inicial si difieren)
       if (newRule.status === "active") {
         const persistedRule: RecurrenceRule = {
           ...newRule,
           id: finalRuleId,
         };
-        const occurrences = generateOccurrencesForRuleInMonth({
-          rule: persistedRule,
-          yearMonth: currentYearMonth,
-          referenceDate,
-        });
-
-        for (const occ of occurrences) {
-          await createTransaction(occ);
+        const effectiveCutoffDate =
+          openingBalanceDateOverride || account.opening_balance_date;
+        const ruleStartYm = persistedRule.start_date.slice(0, 7);
+        const monthsToSeed = [currentYearMonth];
+        if (ruleStartYm && ruleStartYm >= referenceDate.slice(0, 7)) {
+          monthsToSeed.push(ruleStartYm);
         }
+        await buildAndPersistMissingOccurrences(
+          [persistedRule],
+          monthsToSeed,
+          transactions,
+          effectiveCutoffDate
+        );
       }
 
       showToast(`Regla recurrente "${newRule.title}" creada`);
@@ -1579,45 +1802,119 @@ export function FinanceStoreProvider({
     [
       workspaceId,
       account.id,
+      account.opening_balance_date,
       user.isAuthenticated,
       currentYearMonth,
       referenceDate,
-      createTransaction,
+      transactions,
+      buildAndPersistMissingOccurrences,
       showToast,
     ]
   );
 
   const updateRecurrenceRule = useCallback(
     async (id: string, updates: Partial<RecurrenceRule>) => {
+      const existingRule = recurrenceRules.find((r) => r.id === id);
+      const updatedRule: RecurrenceRule | null = existingRule
+        ? { ...existingRule, ...updates }
+        : null;
+
       setRecurrenceRules((prev) =>
         prev.map((r) => (r.id === id ? { ...r, ...updates } : r))
       );
 
-      setTransactions((prev) =>
-        prev.map((tx) => {
-          if (tx.recurrence_rule_id !== id) return tx;
-          if (tx.status === "paid" || tx.status === "received") return tx;
-          return {
-            ...tx,
-            title: updates.title ?? tx.title,
-            estimated_amount:
-              updates.default_amount !== undefined
-                ? updates.default_amount
-                : tx.estimated_amount,
-            priority: updates.priority ?? tx.priority,
-            category_id:
-              updates.category_id !== undefined
-                ? updates.category_id
-                : tx.category_id,
-            amount_type: updates.amount_type ?? tx.amount_type,
-          };
-        })
+      const scheduleChanged = Boolean(
+        existingRule &&
+          ((updates.frequency !== undefined &&
+            updates.frequency !== existingRule.frequency) ||
+            (updates.day_of_month !== undefined &&
+              updates.day_of_month !== existingRule.day_of_month) ||
+            (updates.semimonthly_days !== undefined &&
+              updates.semimonthly_days !== existingRule.semimonthly_days) ||
+            (updates.day_of_week !== undefined &&
+              updates.day_of_week !== existingRule.day_of_week) ||
+            (updates.start_date !== undefined &&
+              updates.start_date !== existingRule.start_date) ||
+            (updates.end_date !== undefined &&
+              updates.end_date !== existingRule.end_date))
       );
+
+      let idsToReplace: string[] = [];
+      let preservedTransactions = transactions;
+
+      if (scheduleChanged && updatedRule) {
+        const minYmDate = `${currentYearMonth}-01`;
+        idsToReplace = transactions
+          .filter(
+            (tx) =>
+              tx.recurrence_rule_id === id &&
+              tx.status !== "paid" &&
+              tx.status !== "received" &&
+              tx.status !== "cancelled" &&
+              !tx.is_exception &&
+              (tx.occurrence_date || tx.expected_date).slice(0, 10) >= minYmDate
+          )
+          .map((tx) => {
+            if (tx.occurrence_date) {
+              materializedOccKeysRef.current.delete(
+                `${id}:${tx.occurrence_date.slice(0, 10)}`
+              );
+            }
+            return tx.id;
+          });
+
+        preservedTransactions = transactions
+          .filter((tx) => !idsToReplace.includes(tx.id))
+          .map((tx) => {
+            if (tx.recurrence_rule_id !== id) return tx;
+            if (tx.status === "paid" || tx.status === "received") return tx;
+            return {
+              ...tx,
+              title: updates.title ?? tx.title,
+              estimated_amount:
+                updates.default_amount !== undefined
+                  ? updates.default_amount
+                  : tx.estimated_amount,
+              priority: updates.priority ?? tx.priority,
+              category_id:
+                updates.category_id !== undefined
+                  ? updates.category_id
+                  : tx.category_id,
+              amount_type: updates.amount_type ?? tx.amount_type,
+              notes: updates.notes !== undefined ? updates.notes : tx.notes,
+            };
+          });
+
+        setTransactions(preservedTransactions);
+      } else {
+        setTransactions((prev) =>
+          prev.map((tx) => {
+            if (tx.recurrence_rule_id !== id) return tx;
+            if (tx.status === "paid" || tx.status === "received") return tx;
+            return {
+              ...tx,
+              title: updates.title ?? tx.title,
+              estimated_amount:
+                updates.default_amount !== undefined
+                  ? updates.default_amount
+                  : tx.estimated_amount,
+              priority: updates.priority ?? tx.priority,
+              category_id:
+                updates.category_id !== undefined
+                  ? updates.category_id
+                  : tx.category_id,
+              amount_type: updates.amount_type ?? tx.amount_type,
+              notes: updates.notes !== undefined ? updates.notes : tx.notes,
+            };
+          })
+        );
+      }
 
       if (user.isAuthenticated && workspaceId) {
         await supabase
           .from("recurrence_rules")
           .update({
+            type: updates.type,
             title: updates.title,
             default_amount: updates.default_amount,
             amount_type: updates.amount_type,
@@ -1631,12 +1928,74 @@ export function FinanceStoreProvider({
             notes: updates.notes,
           })
           .eq("id", id);
+
+        if (idsToReplace.length > 0) {
+          await supabase
+            .from("transactions")
+            .delete()
+            .in("id", idsToReplace)
+            .eq("workspace_id", workspaceId);
+        }
+      }
+
+      if (scheduleChanged && updatedRule && updatedRule.status === "active") {
+        const months = [currentYearMonth];
+        const startYm = updatedRule.start_date.slice(0, 7);
+        if (startYm >= referenceDate.slice(0, 7)) {
+          months.push(startYm);
+        }
+        await buildAndPersistMissingOccurrences(
+          [updatedRule],
+          months,
+          preservedTransactions,
+          account.opening_balance_date
+        );
       }
 
       showToast("Regla recurrente actualizada");
     },
-    [user.isAuthenticated, workspaceId, showToast]
+    [
+      recurrenceRules,
+      transactions,
+      currentYearMonth,
+      referenceDate,
+      account.opening_balance_date,
+      user.isAuthenticated,
+      workspaceId,
+      buildAndPersistMissingOccurrences,
+      showToast,
+    ]
   );
+
+  // Materializar automáticamente ocurrencias pendientes al navegar a meses actuales o futuros
+  useEffect(() => {
+    if (
+      !user.onboardingCompleted ||
+      !workspaceId ||
+      account.id === "acc-empty" ||
+      currentYearMonth < referenceDate.slice(0, 7) ||
+      recurrenceRules.length === 0
+    ) {
+      return;
+    }
+
+    void buildAndPersistMissingOccurrences(
+      recurrenceRules,
+      [currentYearMonth],
+      transactions,
+      account.opening_balance_date
+    );
+  }, [
+    user.onboardingCompleted,
+    workspaceId,
+    account.id,
+    account.opening_balance_date,
+    currentYearMonth,
+    referenceDate,
+    recurrenceRules,
+    transactions,
+    buildAndPersistMissingOccurrences,
+  ]);
 
   const deleteRecurrenceRule = useCallback(
     async (id: string) => {
@@ -1806,46 +2165,51 @@ export function FinanceStoreProvider({
             Math.min(Math.max(1, inc.dayOfMonth || 15), maxDay)
           ).padStart(2, "0");
           const expDate = inc.startDate || `${currentYearMonth}-${dStr}`;
+          const isPriorToCutoff =
+            expDate.slice(0, 10) < onboardingDraft.openingDate.slice(0, 10);
           await createTransaction({
             type: "income",
             title: inc.title,
             category_id: incomeCatId,
             priority: "essential",
-            status: "scheduled",
+            status: isPriorToCutoff ? "received" : "scheduled",
             amount_type: inc.amountType || "fixed",
             estimated_amount: inc.amount,
-            actual_amount: null,
+            actual_amount: isPriorToCutoff ? inc.amount : null,
             expected_date: expDate,
-            settled_date: null,
-            settled_at: null,
+            settled_date: isPriorToCutoff ? expDate : null,
+            settled_at: isPriorToCutoff ? `${expDate}T12:00:00.000Z` : null,
             recurrence_rule_id: null,
             occurrence_date: null,
             is_exception: false,
             notes: "Configurado durante tu bienvenida",
           });
         } else {
-          await createRecurrenceRule({
-            type: "income",
-            title: inc.title,
-            category_id: incomeCatId,
-            priority: "essential",
-            amount_type: inc.amountType || "fixed",
-            default_amount: inc.amount,
-            frequency: inc.frequency,
-            interval_count: 1,
-            day_of_month: inc.dayOfMonth || 15,
-            semimonthly_days:
-              inc.semimonthlyDays !== undefined
-                ? inc.semimonthlyDays
-                : inc.frequency === "semimonthly"
-                ? "15,last"
-                : null,
-            day_of_week: inc.dayOfWeek ?? null,
-            start_date: inc.startDate || `${currentYearMonth}-01`,
-            end_date: null,
-            status: "active",
-            notes: inc.scheduleSummary || "Configurado durante tu bienvenida",
-          });
+          await createRecurrenceRule(
+            {
+              type: "income",
+              title: inc.title,
+              category_id: incomeCatId,
+              priority: "essential",
+              amount_type: inc.amountType || "fixed",
+              default_amount: inc.amount,
+              frequency: inc.frequency,
+              interval_count: 1,
+              day_of_month: inc.dayOfMonth || 15,
+              semimonthly_days:
+                inc.semimonthlyDays !== undefined
+                  ? inc.semimonthlyDays
+                  : inc.frequency === "semimonthly"
+                  ? "15,last"
+                  : null,
+              day_of_week: inc.dayOfWeek ?? null,
+              start_date: inc.startDate || `${currentYearMonth}-01`,
+              end_date: null,
+              status: "active",
+              notes: inc.scheduleSummary || "Configurado durante tu bienvenida",
+            },
+            onboardingDraft.openingDate
+          );
         }
       }
     }
@@ -1853,23 +2217,26 @@ export function FinanceStoreProvider({
     // Crear reglas de gastos fijos recurrentes agregadas en Onboarding Paso 5
     for (const exp of onboardingDraft.fixedExpenses) {
       if (exp.amount > 0) {
-        await createRecurrenceRule({
-          type: "expense",
-          title: exp.title,
-          category_id: exp.categoryId || categories[0]?.id || null,
-          priority: exp.priority,
-          amount_type: exp.amountType,
-          default_amount: exp.amount,
-          frequency: exp.frequency || "monthly",
-          interval_count: 1,
-          day_of_month: exp.dayOfMonth || 1,
-          semimonthly_days: exp.semimonthlyDays ?? null,
-          day_of_week: exp.dayOfWeek ?? null,
-          start_date: exp.startDate || `${currentYearMonth}-01`,
-          end_date: null,
-          status: "active",
-          notes: exp.scheduleSummary || "Compromiso recurrente",
-        });
+        await createRecurrenceRule(
+          {
+            type: "expense",
+            title: exp.title,
+            category_id: exp.categoryId || categories[0]?.id || null,
+            priority: exp.priority,
+            amount_type: exp.amountType,
+            default_amount: exp.amount,
+            frequency: exp.frequency || "monthly",
+            interval_count: 1,
+            day_of_month: exp.dayOfMonth || 1,
+            semimonthly_days: exp.semimonthlyDays ?? null,
+            day_of_week: exp.dayOfWeek ?? null,
+            start_date: exp.startDate || `${currentYearMonth}-01`,
+            end_date: null,
+            status: "active",
+            notes: exp.scheduleSummary || "Compromiso recurrente",
+          },
+          onboardingDraft.openingDate
+        );
       }
     }
 
