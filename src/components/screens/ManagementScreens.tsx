@@ -45,6 +45,7 @@ import {
   Target,
   Calendar as CalendarIcon,
   Check,
+  HelpCircle,
 } from "lucide-react";
 
 const FREQ_LABELS: Record<RecurrenceFrequency, string> = {
@@ -101,7 +102,7 @@ export function ManagementScreens() {
     auditLog,
     theme,
     toggleTheme,
-    setIsTutorialOpen,
+    openTutorialAtPhase,
     referenceDate,
   } = useFinanceStore();
 
@@ -258,14 +259,25 @@ export function ManagementScreens() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setActiveScreen("P23")}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#34483D] text-white text-xs font-semibold cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Nueva regla</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => openTutorialAtPhase(7)}
+              aria-label="¿Cómo usar compromisos recurrentes?"
+              title="¿Cómo usar compromisos recurrentes?"
+              className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl bg-[#FFFFFF] border border-[#E4E6DE] text-[#34483D] hover:bg-[#F0F1EB] cursor-pointer"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveScreen("P23")}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#34483D] text-white text-xs font-semibold cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Nueva regla</span>
+            </button>
+          </div>
         </div>
 
         {/* Pestañas Activas vs Pausadas */}
@@ -1797,7 +1809,7 @@ export function ManagementScreens() {
 
         <button
           type="button"
-          onClick={() => setIsTutorialOpen(true)}
+          onClick={() => openTutorialAtPhase(1)}
           className="w-full p-4 flex items-center justify-between hover:bg-[#F6F5F0] transition cursor-pointer"
         >
           <div className="flex items-center gap-3">
