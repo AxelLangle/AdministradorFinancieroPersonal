@@ -134,7 +134,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   ].includes(activeScreen);
 
   return (
-    <div className="min-h-screen bg-[#EAE8E1] text-[#26332D] flex flex-col items-center">
+    <div className="min-h-[100dvh] bg-[#EAE8E1] text-[#26332D] flex flex-col items-center">
       {/* Barra superior limpia de producción: Modo Oscuro, Manual y Guía Rápida */}
       <div className="w-full bg-[#26332D] text-[#F6F5F0] px-3.5 py-2 text-xs flex items-center justify-between gap-2 z-40 border-b border-[#34483D]">
         <div className="flex items-center gap-2">
@@ -209,7 +209,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Contenedor Mobile-First */}
       <div
-        className={`relative w-full bg-[#F6F5F0] min-h-[calc(100vh-37px)] flex flex-col shadow-2xl border-x border-[#E4E6DE] transition-all ${
+        className={`relative w-full bg-[#F6F5F0] min-h-[calc(100dvh-37px)] flex flex-col shadow-2xl border-x border-[#E4E6DE] transition-all ${
           viewportMode === "mobile" ? "max-w-[430px]" : "max-w-5xl"
         }`}
       >
