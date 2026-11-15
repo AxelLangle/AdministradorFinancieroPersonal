@@ -5,6 +5,7 @@ import { useFinanceStore } from "@/lib/store/finance-store";
 import {
   formatDateDDMMYYYY,
   formatMXN,
+  formatNumberWithCommas,
   getEffectiveAmount,
 } from "@/lib/finance/engine";
 import {
@@ -37,6 +38,7 @@ import {
   Moon,
   Sun,
   Trash2,
+  Target,
 } from "lucide-react";
 
 const FREQ_LABELS: Record<RecurrenceFrequency, string> = {
@@ -61,6 +63,8 @@ export function ManagementScreens() {
     syncStatusMessage,
     account,
     updateAccountOpeningBalance,
+    budget,
+    updateBudget,
     recurrenceRules,
     selectedRuleId,
     setSelectedRuleId,
@@ -106,9 +110,12 @@ export function ManagementScreens() {
   const [catPriority, setCatPriority] = useState<PriorityLevel>("important");
   const [catActive, setCatActive] = useState(true);
 
-  // Estados para Configuración de Saldo Inicial y Corte
+  // Estados para Configuración de Saldo Inicial, Corte y Límite mensual
   const [cfgBalanceNum, setCfgBalanceNum] = useState(account.opening_balance);
   const [cfgDate, setCfgDate] = useState(account.opening_balance_date);
+  const [cfgBudgetLimitNum, setCfgBudgetLimitNum] = useState(
+    budget.total_limit
+  );
 
   const selectedRule =
     recurrenceRules.find((r) => r.id === selectedRuleId) ||
@@ -153,8 +160,9 @@ export function ManagementScreens() {
     } else if (activeScreen === "P29") {
       setCfgBalanceNum(account.opening_balance);
       setCfgDate(account.opening_balance_date);
+      setCfgBudgetLimitNum(budget.total_limit);
     }
-  }, [activeScreen, selectedRule, selectedCat, account, categories]);
+  }, [activeScreen, selectedRule, selectedCat, account, budget.total_limit, categories]);
 
   // === Lista de Reglas Recurrentes (Activas / Pausadas) ===
   if (activeScreen === "P22") {
@@ -487,7 +495,9 @@ export function ManagementScreens() {
                   min={1}
                   max={31}
                   value={ruleDay}
-                  onChange={(e) => setRuleDay(e.target.value)}
+                  onChange={(e) =>
+                    setRuleDay(e.target.value.replace(/^0+(?=\d)/, ""))
+                  }
                   placeholder="Ej. 15"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-[#F0F1EB] border border-[#E4E6DE] text-xs font-bold tabular-nums text-[#26332D]"
                 />
@@ -883,11 +893,21 @@ export function ManagementScreens() {
     );
   }
 
-  // === Configuración (Saldo Inicial, Fecha de Corte y Bitácora) ===
+  // === Configuración (Límite Mensual, Saldo Inicial, Fecha de Corte y Bitácora) ===
   if (activeScreen === "P29") {
     const handleSaveConfig = (e: React.FormEvent) => {
       e.preventDefault();
       updateAccountOpeningBalance(cfgBalanceNum, cfgDate);
+    };
+
+    const handleSaveMonthlyLimit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      const newTotal = cfgBudgetLimitNum > 0 ? cfgBudgetLimitNum : 0;
+      const pct = budget.min_cushion_percent || 10;
+      await updateBudget({
+        total_limit: newTotal,
+        min_cushion_amount: Math.round(newTotal * (pct / 100) * 100) / 100,
+      });
     };
 
     return (
@@ -896,7 +916,7 @@ export function ManagementScreens() {
           <button
             type="button"
             onClick={() => setActiveScreen("P28")}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#68736B] hover:text-[#26332D] cursor-pointer"
+            className="min-h-[44px] px-2 -ml-2 rounded-xl inline-flex items-center gap-1.5 text-xs font-semibold text-[#68736B] hover:text-[#26332D] cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Volver a Más</span>
@@ -905,6 +925,65 @@ export function ManagementScreens() {
             Configuración de cuenta
           </span>
         </div>
+
+        {/* Límite de gasto mensual */}
+        <form onSubmit={handleSaveMonthlyLimit} className="space-y-4">
+          <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-3.5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-[#68736B]">
+                Límite de gasto mensual
+              </h2>
+              <button
+                type="button"
+                onClick={() => setActiveScreen("P21")}
+                className="text-[11px] font-semibold text-[#34483D] underline cursor-pointer"
+              >
+                Alertas y colchón
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[#68736B] mb-1">
+                Límite máximo mensual (MXN)
+              </label>
+              <CurrencyInput
+                value={cfgBudgetLimitNum}
+                onChange={(_, num) => setCfgBudgetLimitNum(num)}
+                placeholder="Ej. 20,000.00"
+              />
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {[5000, 10000, 15000, 20000, 30000].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setCfgBudgetLimitNum(preset)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border cursor-pointer transition ${
+                      cfgBudgetLimitNum === preset
+                        ? "bg-[#34483D] text-white border-[#34483D]"
+                        : "bg-[#F0F1EB] text-[#26332D] border-[#E4E6DE] hover:border-[#91A68C]"
+                    }`}
+                  >
+                    ${formatNumberWithCommas(preset, 0)}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-[#68736B] mt-1.5 leading-relaxed">
+                Límite actual:{" "}
+                <strong className="text-[#26332D]">
+                  {formatMXN(budget.total_limit)}
+                </strong>
+                . Puedes subirlo o bajarlo cuando lo necesites.
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              className="min-h-[44px] w-full py-2.5 px-4 rounded-xl bg-[#34483D] hover:bg-[#26332D] text-white text-xs font-semibold cursor-pointer"
+            >
+              Guardar límite de gasto mensual
+            </button>
+          </div>
+        </form>
 
         <form onSubmit={handleSaveConfig} className="space-y-4">
           <div className="bg-[#FFFFFF] rounded-2xl p-4 border border-[#E4E6DE] space-y-3.5">
@@ -1266,6 +1345,25 @@ export function ManagementScreens() {
 
         <button
           type="button"
+          onClick={() => setActiveScreen("P21")}
+          className="w-full p-4 flex items-center justify-between hover:bg-[#F6F5F0] transition cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <Target className="w-5 h-5 text-[#34483D]" />
+            <div className="text-left">
+              <div className="text-sm font-bold text-[#26332D]">
+                Límite de gasto mensual
+              </div>
+              <div className="text-xs text-[#68736B]">
+                Tope actual: {formatMXN(budget.total_limit)} • Toca para cambiar
+              </div>
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-[#68736B]" />
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveScreen("P29")}
           className="w-full p-4 flex items-center justify-between hover:bg-[#F6F5F0] transition cursor-pointer"
         >
@@ -1276,7 +1374,7 @@ export function ManagementScreens() {
                 Configuración y Corte de Saldo
               </div>
               <div className="text-xs text-[#68736B]">
-                Saldo inicial ({formatMXN(account.opening_balance)}) e historial
+                Saldo inicial ({formatMXN(account.opening_balance)}), límite mensual e historial
               </div>
             </div>
           </div>
