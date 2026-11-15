@@ -258,3 +258,50 @@ export interface NextIncomeStretch {
     balance: number;
   };
 }
+
+export interface CustomScheduleDayItem {
+  day: number | "last";
+  amount?: number | null;
+}
+
+export interface ParsedRecurrenceSchedule {
+  mode: "single_day" | "semimonthly" | "multi_day" | "biweekly" | "weekly";
+  items: CustomScheduleDayItem[];
+  alternateAmount: number | null;
+  weekendShift: "none" | "friday";
+}
+
+export interface FinancialInsightTip {
+  id: string;
+  severity: "urgent" | "warning" | "positive" | "info";
+  title: string;
+  description: string;
+  impactText?: string;
+  actionLabel?: string;
+  actionScreen?: ScreenId;
+  actionTransactionId?: string;
+}
+
+export interface FinancialProjectionExplanation {
+  statusColor: TrafficLightColor;
+  headline: string;
+  summaryText: string;
+  formula: {
+    startingLabel: string;
+    startingAmount: number;
+    scheduledIncomesAmount: number;
+    pendingExpensesAmount: number;
+    projectedClosingAmount: number;
+  };
+  liquidityRadar: {
+    lowestDate: string | null;
+    lowestBalance: number | null;
+    minCushionAmount: number;
+    hasMidMonthDip: boolean;
+    daysUntilNextIncome: number | null;
+    nextIncomeTitle: string | null;
+    nextIncomeAmount: number | null;
+    balanceBeforeNextIncome: number | null;
+  };
+  tips: FinancialInsightTip[];
+}
