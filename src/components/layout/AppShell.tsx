@@ -47,7 +47,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     toastMessage,
     theme,
     toggleTheme,
-    setIsTutorialOpen,
+    openTutorialAtPhase,
   } = useFinanceStore();
 
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
@@ -147,25 +147,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setIsTutorialOpen(true)}
-            title="Ver tutorial interactivo de uso"
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#34483D]/80 hover:bg-[#34483D] text-[#E8DCCB] transition cursor-pointer"
-          >
-            <HelpCircle className="w-3.5 h-3.5" />
-            <span>Tutorial</span>
-          </button>
+          {showBottomNav && (
+            <>
+              <button
+                type="button"
+                onClick={() => openTutorialAtPhase(1)}
+                title="Ver tutorial interactivo de uso"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#34483D]/80 hover:bg-[#34483D] text-[#E8DCCB] transition cursor-pointer"
+              >
+                <HelpCircle className="w-3.5 h-3.5" />
+                <span>Tutorial</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveScreen("MANUAL")}
-            title="Abrir manual completo de usuario"
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#34483D]/80 hover:bg-[#34483D] text-[#E8DCCB] transition cursor-pointer"
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Manual</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => setActiveScreen("MANUAL")}
+                title="Abrir manual completo de usuario"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#34483D]/80 hover:bg-[#34483D] text-[#E8DCCB] transition cursor-pointer"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Manual</span>
+              </button>
+            </>
+          )}
 
           <button
             type="button"
