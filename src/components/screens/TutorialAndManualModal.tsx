@@ -4,6 +4,10 @@ import React, { useState } from "react";
 import { useFinanceStore } from "@/lib/store/finance-store";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import {
+  useBottomSheetDragToDismiss,
+  useHorizontalSwipe,
+} from "@/lib/hooks/useSwipeGesture";
+import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
@@ -181,14 +185,52 @@ export function InteractiveTutorialModal() {
   const { isTutorialOpen, setIsTutorialOpen } = useFinanceStore();
   const [slideIdx, setSlideIdx] = useState(0);
 
+  const closeTutorial = () => {
+    setIsTutorialOpen(false);
+    setSlideIdx(0);
+  };
+
+  const slideSwipeHandlers = useHorizontalSwipe({
+    enabled: isTutorialOpen,
+    threshold: 48,
+    onSwipeLeft: () =>
+      setSlideIdx((i) => Math.min(TUTORIAL_SLIDES.length - 1, i + 1)),
+    onSwipeRight: () => setSlideIdx((i) => Math.max(0, i - 1)),
+  });
+
+  const modalDrag = useBottomSheetDragToDismiss({
+    enabled: isTutorialOpen,
+    onClose: closeTutorial,
+  });
+
   if (!isTutorialOpen) return null;
 
   const slide = TUTORIAL_SLIDES[slideIdx];
   const isLast = slideIdx === TUTORIAL_SLIDES.length - 1;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="w-full max-w-[410px] bg-[#FFFFFF] rounded-3xl p-6 border border-[#E4E6DE] shadow-2xl space-y-5">
+    <div
+      onClick={modalDrag.handleBackdropClick}
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+    >
+      <div
+        onTouchStart={(e) => {
+          slideSwipeHandlers.onTouchStart(e);
+          modalDrag.sheetTouchHandlers.onTouchStart(e);
+        }}
+        onTouchMove={modalDrag.sheetTouchHandlers.onTouchMove}
+        onTouchEnd={(e) => {
+          slideSwipeHandlers.onTouchEnd(e);
+          modalDrag.sheetTouchHandlers.onTouchEnd();
+        }}
+        onTouchCancel={() => {
+          slideSwipeHandlers.onTouchCancel();
+          modalDrag.sheetTouchHandlers.onTouchCancel();
+        }}
+        style={modalDrag.sheetStyle}
+        className="w-full max-w-[410px] bg-[#FFFFFF] rounded-3xl p-6 border border-[#E4E6DE] shadow-2xl space-y-5"
+      >
+        <div className="w-12 h-1.5 rounded-full bg-[#E4E6DE] mx-auto -mt-2" />
         <div className="flex items-center justify-between">
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#E8DCCB] text-[#34483D] text-xs font-bold">
             <Sparkles className="w-3.5 h-3.5" />
@@ -198,11 +240,8 @@ export function InteractiveTutorialModal() {
           </span>
           <button
             type="button"
-            onClick={() => {
-              setIsTutorialOpen(false);
-              setSlideIdx(0);
-            }}
-            className="p-1.5 rounded-full bg-[#F0F1EB] text-[#68736B] hover:text-[#26332D] cursor-pointer"
+            onClick={closeTutorial}
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full bg-[#F0F1EB] text-[#68736B] hover:text-[#26332D] cursor-pointer"
             title="Cerrar guía"
           >
             <X className="w-4 h-4" />
@@ -260,18 +299,16 @@ export function InteractiveTutorialModal() {
             <button
               type="button"
               onClick={() => setSlideIdx((i) => i - 1)}
-              className="py-3 px-4 rounded-xl bg-[#F0F1EB] text-[#26332D] text-xs font-semibold cursor-pointer"
+              className="min-h-[44px] py-3 px-4 rounded-xl bg-[#F0F1EB] text-[#26332D] text-xs font-semibold cursor-pointer inline-flex items-center gap-1"
             >
-              Anterior
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Anterior</span>
             </button>
           ) : (
             <button
               type="button"
-              onClick={() => {
-                setIsTutorialOpen(false);
-                setSlideIdx(0);
-              }}
-              className="py-3 px-3 text-xs font-semibold text-[#68736B] hover:text-[#26332D] cursor-pointer"
+              onClick={closeTutorial}
+              className="min-h-[44px] py-3 px-3 text-xs font-semibold text-[#68736B] hover:text-[#26332D] cursor-pointer"
             >
               Omitir tour
             </button>
@@ -281,17 +318,19 @@ export function InteractiveTutorialModal() {
             type="button"
             onClick={() => {
               if (isLast) {
-                setIsTutorialOpen(false);
-                setSlideIdx(0);
+                closeTutorial();
               } else {
                 setSlideIdx((i) => i + 1);
               }
             }}
-            className="flex-1 py-3 px-4 rounded-xl bg-[#34483D] hover:bg-[#26332D] text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+            className="min-h-[44px] flex-1 py-3 px-4 rounded-xl bg-[#34483D] hover:bg-[#26332D] text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <span>{isLast ? "¡Empezar a usar mi calendario!" : "Siguiente"}</span>
             {!isLast && <ArrowRight className="w-4 h-4" />}
           </button>
+        </div>
+        <div className="text-[10px] text-center text-[#68736B]">
+          Tip táctil: desliza izquierda/derecha para cambiar de paso o hacia abajo para cerrar
         </div>
       </div>
     </div>
@@ -319,7 +358,7 @@ export function UserManualScreen() {
         <button
           type="button"
           onClick={goBack}
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#68736B] hover:text-[#26332D] cursor-pointer"
+          className="min-h-[44px] px-2 -ml-2 rounded-xl inline-flex items-center gap-1.5 text-xs font-semibold text-[#68736B] hover:text-[#26332D] cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Volver</span>
@@ -327,7 +366,7 @@ export function UserManualScreen() {
         <button
           type="button"
           onClick={() => setIsTutorialOpen(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#34483D] text-white text-xs font-semibold cursor-pointer"
+          className="min-h-[44px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#34483D] text-white text-xs font-semibold cursor-pointer"
         >
           <Sparkles className="w-3.5 h-3.5" />
           <span>Iniciar Tour Interactivo</span>
