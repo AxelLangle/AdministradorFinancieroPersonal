@@ -6,6 +6,7 @@ import {
   calculateCurrentBalance,
   calculateMonthProjection,
   calculateNextIncomeStretch,
+  filterTransactions,
   isDateBeforeOpeningBalance,
 } from "./engine.ts";
 import {
@@ -171,5 +172,30 @@ describe("Motor de Cálculo Financiero (PRD v1.1.2 - Dataset Maestro Sofía)", (
     assert.equal(novNetflix.estimated_amount, 249.0);
     assert.equal(decNetflix.estimated_amount, 249.0);
     assert.equal(paidRenta.actual_amount, 6500.0);
+  });
+
+  it("8. Excluye movimientos con estado 'cancelled' de filterTransactions por defecto", () => {
+    const cancelledTx = {
+      ...SOFIA_TRANSACTIONS[0],
+      id: "tx-cancelled-test",
+      status: "cancelled" as const,
+      title: "Pago cancelado",
+    };
+    const filtered = filterTransactions(
+      [...SOFIA_TRANSACTIONS, cancelledTx],
+      {
+        searchQuery: "",
+        type: "all",
+        statuses: [],
+        priorities: [],
+        categoryIds: [],
+        recurrenceFilter: "all",
+      },
+      SOFIA_REFERENCE_DATE
+    );
+    assert.equal(
+      filtered.some((t) => t.id === "tx-cancelled-test"),
+      false
+    );
   });
 });
