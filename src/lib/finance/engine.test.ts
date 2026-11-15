@@ -1,16 +1,21 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  affectsCurrentBalance,
+  adjustDateForExclusions,
   appearsOnCalendarDate,
   applyRecurrenceEditScope,
   calculateBudgetSummary,
   calculateCurrentBalance,
   calculateMonthProjection,
   calculateNextIncomeStretch,
+  describeRecurrenceRuleSchedule,
   explainFinancialProjection,
   filterTransactions,
   generateOccurrencesForRuleInMonth,
   isDateBeforeOpeningBalance,
+  isPriorToTodayOrCutoff,
+  parseRecurrenceSchedule,
   serializeRecurrenceSchedule,
 } from "./engine.ts";
 import {
@@ -339,5 +344,355 @@ describe("Motor de Cálculo Financiero (PRD v1.1.2 - Dataset Maestro Sofía)", (
     assert.equal(explanation.formula.pendingExpensesAmount, 3280);
     assert.equal(explanation.formula.projectedClosingAmount, 12200.5);
     assert.equal(explanation.tips.length >= 2, true);
+  });
+
+  it("13. No descuenta del saldo actual ($5,000 el 15/11/2026) los gastos recurrentes de días previos al corte (ej. Internet el día 1)", () => {
+    const accountNov15 = {
+      ...SOFIA_ACCOUNT,
+      opening_balance: 5000,
+      opening_balance_date: "2026-11-15",
+      opening_balance_at: "2026-11-15T12:00:00.000Z",
+    };
+
+    const internetRule = {
+      ...SOFIA_RECURRENCE_RULES[0],
+      id: "rule-internet-dia-1",
+      type: "expense" as const,
+      title: "Internet",
+      default_amount: 600,
+      frequency: "monthly" as const,
+      day_of_month: 1,
+      semimonthly_days: null,
+      start_date: "2026-11-01",
+      status: "active" as const,
+    };
+
+    const occurrences = generateOccurrencesForRuleInMonth({
+      rule: internetRule,
+      yearMonth: "2026-11",
+      referenceDate: "2026-11-15",
+      openingBalanceDate: accountNov15.opening_balance_date,
+    });
+
+    assert.equal(occurrences.length, 1);
+    assert.equal(occurrences[0].expected_date, "2026-11-01");
+    assert.equal(occurrences[0].status, "paid");
+    assert.equal(occurrences[0].settled_date, "2026-11-01");
+    assert.equal(occurrences[0].actual_amount, 600);
+
+    const hydratedOccurrences = occurrences.map((occ, idx) => ({
+      ...occ,
+      id: `tx-test-${idx}`,
+      workspace_id: accountNov15.workspace_id,
+      account_id: accountNov15.id,
+      created_at: "2026-11-15T12:00:00.000Z",
+      updated_at: "2026-11-15T12:00:00.000Z",
+    }));
+
+    const currentBalance = calculateCurrentBalance(
+      accountNov15,
+      hydratedOccurrences
+    );
+    assert.equal(currentBalance, 5000);
+  });
+
+  it("14. Elegir día 24 (catorcenal o semanal) NO genera cobros/pagos fantasma el día 10 ni antes de start_date", () => {
+    const biweeklyDay24Rule = {
+      ...SOFIA_RECURRENCE_RULES[0],
+      id: "rule-biweekly-day24",
+      type: "expense" as const,
+      title: "Recordatorio Quincena/Catorcena 24",
+      default_amount: 1200,
+      frequency: "biweekly" as const,
+      day_of_month: 24,
+      semimonthly_days: null,
+      day_of_week: null,
+      start_date: "2026-11-24",
+      status: "active" as const,
+    };
+
+    const novOccs = generateOccurrencesForRuleInMonth({
+      rule: biweeklyDay24Rule,
+      yearMonth: "2026-11",
+      referenceDate: "2026-11-18",
+      openingBalanceDate: "2026-11-01",
+    });
+
+    assert.deepEqual(
+      novOccs.map((o) => o.expected_date),
+      ["2026-11-24"]
+    );
+    assert.equal(novOccs.some((o) => o.expected_date === "2026-11-10"), false);
+
+    const decOccs = generateOccurrencesForRuleInMonth({
+      rule: biweeklyDay24Rule,
+      yearMonth: "2026-12",
+      referenceDate: "2026-11-18",
+      openingBalanceDate: "2026-11-01",
+    });
+
+    assert.deepEqual(
+      decOccs.map((o) => o.expected_date),
+      ["2026-12-08", "2026-12-22"]
+    );
+
+    const weeklyRuleStartNov24 = {
+      ...SOFIA_RECURRENCE_RULES[0],
+      id: "rule-weekly-day24",
+      type: "expense" as const,
+      title: "Pago semanal martes",
+      default_amount: 450,
+      frequency: "weekly" as const,
+      day_of_month: 24,
+      semimonthly_days: null,
+      day_of_week: 2, // Martes (2026-11-24 es martes)
+      start_date: "2026-11-24",
+      status: "active" as const,
+    };
+
+    const weeklyNovOccs = generateOccurrencesForRuleInMonth({
+      rule: weeklyRuleStartNov24,
+      yearMonth: "2026-11",
+      referenceDate: "2026-11-18",
+      openingBalanceDate: "2026-11-01",
+    });
+
+    assert.deepEqual(
+      weeklyNovOccs.map((o) => o.expected_date),
+      ["2026-11-24"]
+    );
+    assert.equal(
+      describeRecurrenceRuleSchedule(weeklyRuleStartNov24).includes("Semanal"),
+      true
+    );
+  });
+
+  it("15. Marcar como pagado un gasto anterior a 'hoy' (settled_at = null) NO descuenta el saldo líquido actual", () => {
+    const accountTodayNov18 = {
+      ...SOFIA_ACCOUNT,
+      opening_balance: 5000,
+      opening_balance_date: "2026-11-01",
+      opening_balance_at: "2026-11-01T12:00:00.000Z",
+    };
+
+    assert.equal(
+      isPriorToTodayOrCutoff("2026-11-17", accountTodayNov18, "2026-11-18"),
+      true
+    );
+    assert.equal(
+      isPriorToTodayOrCutoff("2026-11-18", accountTodayNov18, "2026-11-18"),
+      false
+    );
+
+    const txPaidPriorToToday = {
+      ...SOFIA_TRANSACTIONS[0],
+      id: "tx-prior-no-deduct",
+      type: "expense" as const,
+      status: "paid" as const,
+      estimated_amount: 900,
+      actual_amount: 900,
+      expected_date: "2026-11-17",
+      settled_date: "2026-11-17",
+      settled_at: null,
+    };
+
+    const txPaidToday = {
+      ...SOFIA_TRANSACTIONS[0],
+      id: "tx-today-deducts",
+      type: "expense" as const,
+      status: "paid" as const,
+      estimated_amount: 300,
+      actual_amount: 300,
+      expected_date: "2026-11-18",
+      settled_date: "2026-11-18",
+      settled_at: "2026-11-18T14:00:00.000Z",
+    };
+
+    assert.equal(affectsCurrentBalance(txPaidPriorToToday, accountTodayNov18), false);
+    assert.equal(affectsCurrentBalance(txPaidToday, accountTodayNov18), true);
+
+    const balance = calculateCurrentBalance(accountTodayNov18, [
+      txPaidPriorToToday,
+      txPaidToday,
+    ]);
+    assert.equal(balance, 4700);
+  });
+
+  it("16. Soporta semanal, catorcenal, quincenal y mensual evitando días específicos (ej. sáb/dom o día 15) + calendario multi-fecha", () => {
+    const serialized = serializeRecurrenceSchedule({
+      items: [{ day: 15 }, { day: "last" }],
+      excludedWeekdays: [0, 6],
+      excludedMonthDays: [15],
+      excludedShift: "prev",
+    });
+
+    const parsed = parseRecurrenceSchedule({
+      semimonthly_days: serialized,
+    });
+
+    assert.deepEqual(parsed.excludedWeekdays, [0, 6]);
+    assert.deepEqual(parsed.excludedMonthDays, [15]);
+    assert.equal(parsed.excludedShift, "prev");
+
+    // 2026-11-15 es domingo Y está en excludedMonthDays[15] -> se recorre al viernes 2026-11-13
+    assert.equal(adjustDateForExclusions("2026-11-15", parsed), "2026-11-13");
+
+    // Regla semanal los sábados (6) evitando fines de semana -> recorre al día siguiente permitido (lunes)
+    const weeklyNoWeekendRule = {
+      ...SOFIA_RECURRENCE_RULES[0],
+      id: "rule-weekly-avoid-wknd",
+      type: "expense" as const,
+      title: "Pago semanal hábil",
+      default_amount: 500,
+      frequency: "weekly" as const,
+      day_of_week: 6,
+      start_date: "2026-11-01",
+      semimonthly_days: serializeRecurrenceSchedule({
+        excludedWeekdays: [0, 6],
+        excludedShift: "next",
+      }),
+      status: "active" as const,
+    };
+
+    const weeklyAdjusted = generateOccurrencesForRuleInMonth({
+      rule: weeklyNoWeekendRule,
+      yearMonth: "2026-11",
+      referenceDate: "2026-11-18",
+      openingBalanceDate: "2026-11-01",
+    });
+
+    assert.deepEqual(
+      weeklyAdjusted.map((o) => o.expected_date),
+      ["2026-11-09", "2026-11-16", "2026-11-23", "2026-11-30"]
+    );
+
+    // Gasto recurrente multi-fecha interactivo (días 5 y 20 con montos propios)
+    const multiDateExpenseRule = {
+      ...SOFIA_RECURRENCE_RULES[0],
+      id: "rule-multi-exp",
+      type: "expense" as const,
+      title: "Pago quincenal colegio/tarjeta",
+      default_amount: 1000,
+      frequency: "monthly" as const,
+      day_of_month: 5,
+      semimonthly_days: serializeRecurrenceSchedule({
+        items: [
+          { day: 5, amount: 1200 },
+          { day: 20, amount: 800 },
+        ],
+        excludedWeekdays: [0, 6],
+        excludedShift: "prev",
+      }),
+      start_date: "2026-11-01",
+      status: "active" as const,
+    };
+
+    const multiNov = generateOccurrencesForRuleInMonth({
+      rule: multiDateExpenseRule,
+      yearMonth: "2026-11",
+      referenceDate: "2026-11-18",
+      openingBalanceDate: "2026-11-01",
+    });
+
+    assert.deepEqual(
+      multiNov.map((o) => ({
+        date: o.expected_date,
+        amt: o.estimated_amount,
+      })),
+      [
+        { date: "2026-11-05", amt: 1200 },
+        { date: "2026-11-20", amt: 800 },
+      ]
+    );
+  });
+
+  it("17. applyRecurrenceEditScope edita más campos (categoría, prioridad, tipo de monto, notas) sin corromper histórico liquidado", () => {
+    const rule = {
+      ...SOFIA_RECURRENCE_RULES[0],
+      id: "rule-edit-rich",
+      title: "Internet Fibra",
+      default_amount: 600,
+      category_id: "cat-servicios",
+      priority: "essential" as const,
+      amount_type: "fixed" as const,
+      notes: "Inicial",
+    };
+
+    const txs = [
+      {
+        ...SOFIA_TRANSACTIONS[0],
+        id: "tx-settled",
+        recurrence_rule_id: "rule-edit-rich",
+        occurrence_date: "2026-10-15",
+        expected_date: "2026-10-15",
+        settled_date: "2026-10-15",
+        settled_at: "2026-10-15T12:00:00.000Z",
+        status: "paid" as const,
+        estimated_amount: 600,
+        actual_amount: 600,
+        title: "Internet Fibra",
+      },
+      {
+        ...SOFIA_TRANSACTIONS[0],
+        id: "tx-pending-nov",
+        recurrence_rule_id: "rule-edit-rich",
+        occurrence_date: "2026-11-20",
+        expected_date: "2026-11-20",
+        settled_date: null,
+        settled_at: null,
+        status: "pending" as const,
+        estimated_amount: 600,
+        actual_amount: null,
+        title: "Internet Fibra",
+      },
+      {
+        ...SOFIA_TRANSACTIONS[0],
+        id: "tx-pending-dec",
+        recurrence_rule_id: "rule-edit-rich",
+        occurrence_date: "2026-12-20",
+        expected_date: "2026-12-20",
+        settled_date: null,
+        settled_at: null,
+        status: "pending" as const,
+        estimated_amount: 600,
+        actual_amount: null,
+        title: "Internet Fibra",
+      },
+    ];
+
+    const res = applyRecurrenceEditScope({
+      transactions: txs,
+      rules: [rule],
+      targetTransactionId: "tx-pending-nov",
+      scope: "future",
+      updates: {
+        title: "Internet Simétrico 300MB",
+        estimated_amount: 750,
+        priority: "important",
+        category_id: "cat-hogaryrenta",
+        amount_type: "variable",
+        notes: "Cargo automático actualizado",
+      },
+    });
+
+    const settled = res.transactions.find((t) => t.id === "tx-settled")!;
+    const nov = res.transactions.find((t) => t.id === "tx-pending-nov")!;
+    const dec = res.transactions.find((t) => t.id === "tx-pending-dec")!;
+
+    assert.equal(settled.title, "Internet Fibra");
+    assert.equal(settled.actual_amount, 600);
+
+    assert.equal(nov.title, "Internet Simétrico 300MB");
+    assert.equal(nov.estimated_amount, 750);
+    assert.equal(nov.priority, "important");
+    assert.equal(nov.category_id, "cat-hogaryrenta");
+    assert.equal(nov.amount_type, "variable");
+    assert.equal(nov.notes, "Cargo automático actualizado");
+    assert.equal(nov.status, "pending");
+
+    assert.equal(dec.title, "Internet Simétrico 300MB");
+    assert.equal(dec.estimated_amount, 750);
+    assert.equal(res.rules[0].notes, "Cargo automático actualizado");
+    assert.equal(res.rules[0].priority, "important");
   });
 });
